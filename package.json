@@ -1,0 +1,65 @@
+{
+  "name": "gcpshot",
+  "version": "0.3.1",
+  "description": "GCPShot - captura de tela premium da Gestão Cultural Pro.",
+  "main": "out/main/index.js",
+  "author": "Gestão Cultural Pro",
+  "homepage": "https://www.gestaoculturalpro.com.br",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && electron-vite build",
+    "start": "electron-vite preview",
+    "dist": "npm run build && electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "br.com.gestaoculturalpro.gcpshot",
+    "productName": "GCPShot",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "build/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "include": "build/installer.nsh",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "GCPShot"
+    }
+  },
+  "dependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^43.0.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "png-to-ico": "^3.0.1",
+    "typescript": "^6.0.3",
+    "vite": "^7.3.6"
+  }
+}

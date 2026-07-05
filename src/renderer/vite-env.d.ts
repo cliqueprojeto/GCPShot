@@ -1,0 +1,31 @@
+/// <reference types="vite/client" />
+
+import type { AppSettings, CaptureExportPayload, CaptureImagePayload, CaptureMode, CaptureResult, RecordMode } from '../shared/capture'
+import type { StudioPickResult } from '../shared/studio'
+
+declare global {
+  interface Window {
+    gcpshot: {
+      beginCapture: (mode?: CaptureMode) => Promise<CaptureResult>
+      beginRecord: (mode?: RecordMode) => Promise<CaptureResult>
+      cancelCapture: () => Promise<void>
+      cancelRecord: () => Promise<void>
+      saveRecording: (buffer: ArrayBuffer, meta?: { extension?: string }) => Promise<CaptureResult>
+      copyCapture: (payload: CaptureExportPayload) => Promise<CaptureResult>
+      saveCapture: (payload: CaptureExportPayload) => Promise<CaptureResult>
+      printCapture: (payload: CaptureExportPayload) => Promise<CaptureResult>
+      shareWhatsApp: (payload: CaptureExportPayload) => Promise<CaptureResult>
+      getSettings: () => Promise<AppSettings>
+      updateSettings: (settings: Partial<AppSettings>) => Promise<AppSettings>
+      resetSettings: () => Promise<AppSettings>
+      showMainWindow: () => Promise<void>
+      openSettingsWindow: () => Promise<void>
+      onOpenSettings: (callback: () => void) => () => void
+      onCaptureImage: (callback: (payload: CaptureImagePayload) => void) => () => void
+      pickStudioImages: () => Promise<StudioPickResult>
+      exportStudioImage: (dataUrl: string) => Promise<CaptureResult>
+    }
+  }
+}
+
+export {}
