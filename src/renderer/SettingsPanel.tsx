@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { AppSettings, SettingsShortcutKey } from '../shared/capture'
 import { defaultAppSettings } from '../shared/capture'
 import type { AppLanguage, TranslationKey } from '../shared/i18n'
@@ -18,9 +18,6 @@ const shortcutOptions = ['Alt+Shift+S', 'Ctrl+Shift+S', 'Alt+Q', 'Ctrl+Alt+S']
 const shortcutFields: ShortcutField[] = [
   { key: 'captureShortcut', labelKey: 'shortcutCapture', icon: 'select' },
   { key: 'fullscreenShortcut', labelKey: 'shortcutFullscreen', icon: 'select' },
-  { key: 'recordRegionShortcut', labelKey: 'shortcutRecordRegion', icon: 'select' },
-  { key: 'recordFullscreenShortcut', labelKey: 'shortcutRecordFullscreen', icon: 'select' },
-  { key: 'recordPauseShortcut', labelKey: 'shortcutRecordPause', icon: 'select' },
   { key: 'studioShortcut', labelKey: 'shortcutStudio', icon: 'select' },
   { key: 'selectShortcut', labelKey: 'shortcutSelect', icon: 'select' },
   { key: 'moveShortcut', labelKey: 'shortcutMove', icon: 'move' },
@@ -113,13 +110,27 @@ export function SettingsPanel({
   onReset,
   onRecordingShortcutChange
 }: SettingsPanelProps): JSX.Element {
+  const [shortcutDrafts, setShortcutDrafts] = useState<Partial<Record<SettingsShortcutKey, string>>>({})
+
+  useEffect(() => {
+    setShortcutDrafts({})
+  }, [settings])
+
+  function displayShortcut(key: SettingsShortcutKey): string {
+    return shortcutDrafts[key] ?? settings[key]
+  }
+
+  function commitShortcut(key: SettingsShortcutKey, shortcut: string): void {
+    setShortcutDrafts((current) => ({ ...current, [key]: shortcut }))
+    onRecordingShortcutChange(null)
+    onUpdateSetting({ [key]: shortcut } as Partial<AppSettings>)
+  }
+
   const tabs = useMemo(
     () =>
       [
         { id: 'general' as const, label: t(language, 'tabGeneral') },
         { id: 'shortcuts' as const, label: t(language, 'tabShortcuts') },
-        { id: 'video' as const, label: t(language, 'tabVideo') },
-        { id: 'audio' as const, label: t(language, 'tabAudio') },
         { id: 'formats' as const, label: t(language, 'tabFormats') }
       ],
     [language]
@@ -226,7 +237,7 @@ export function SettingsPanel({
                     value={
                       recordingShortcut === 'captureShortcut'
                         ? t(language, 'recording')
-                        : settings.captureShortcut
+                        : displayShortcut('captureShortcut')
                     }
                     onFocus={() => onRecordingShortcutChange('captureShortcut')}
                     onKeyDown={(event) => {
@@ -238,8 +249,7 @@ export function SettingsPanel({
                       const shortcut = shortcutFromKeyboardEvent(event)
 
                       if (shortcut) {
-                        onRecordingShortcutChange(null)
-                        onUpdateSetting({ captureShortcut: shortcut })
+                        commitShortcut('captureShortcut', shortcut)
                       }
                     }}
                   />
@@ -275,7 +285,7 @@ export function SettingsPanel({
                     <input
                       readOnly
                       value={
-                        recordingShortcut === field.key ? t(language, 'recording') : settings[field.key]
+                        recordingShortcut === field.key ? t(language, 'recording') : displayShortcut(field.key)
                       }
                       onFocus={() => onRecordingShortcutChange(field.key)}
                       onKeyDown={(event) => {
@@ -287,8 +297,7 @@ export function SettingsPanel({
                         const shortcut = shortcutFromKeyboardEvent(event)
 
                         if (shortcut) {
-                          onRecordingShortcutChange(null)
-                          onUpdateSetting({ [field.key]: shortcut } as Partial<AppSettings>)
+                          commitShortcut(field.key, shortcut)
                         }
                       }}
                     />
@@ -305,120 +314,6 @@ export function SettingsPanel({
               ))}
             </div>
           </>
-        )}
-
-        {settingsTab === 'video' && (
-          <div className="settings-grid">
-            <label>
-              <span>{t(language, 'videoQuality')}</span>
-              <select
-                value={settings.videoQuality}
-                onChange={(event) => onUpdateSetting({ videoQuality: event.currentTarget.value as AppSettings['videoQuality'] })}
-              >
-                <option value="balanced">{t(language, 'videoQualityBalanced')}</option>
-                <option value="sharp">{t(language, 'videoQualitySharp')}</option>
-                <option value="fluid">{t(language, 'videoQualityFluid')}</option>
-              </select>
-            </label>
-            <label>
-              <span>{t(language, 'videoFps')}</span>
-              <select
-                value={settings.videoFps}
-                onChange={(event) => onUpdateSetting({ videoFps: Number(event.currentTarget.value) as AppSettings['videoFps'] })}
-              >
-                <option value="24">24 fps</option>
-                <option value="30">30 fps</option>
-                <option value="60">60 fps</option>
-              </select>
-            </label>
-            <label>
-              <span>{t(language, 'videoResolution')}</span>
-              <select
-                value={settings.videoResolution}
-                onChange={(event) =>
-                  onUpdateSetting({ videoResolution: event.currentTarget.value as AppSettings['videoResolution'] })
-                }
-              >
-                <option value="auto">{t(language, 'videoResolutionAuto')}</option>
-                <option value="1080p">1080p</option>
-                <option value="720p">720p</option>
-              </select>
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={settings.webcamEnabled}
-                onChange={(event) => onUpdateSetting({ webcamEnabled: event.currentTarget.checked })}
-              />
-              <span>{t(language, 'webcamEnabled')}</span>
-            </label>
-            <label>
-              <span>{t(language, 'webcamShape')}</span>
-              <select
-                value={settings.webcamShape}
-                onChange={(event) => onUpdateSetting({ webcamShape: event.currentTarget.value as AppSettings['webcamShape'] })}
-              >
-                <option value="circle">{t(language, 'webcamShapeCircle')}</option>
-                <option value="rounded">{t(language, 'webcamShapeRounded')}</option>
-                <option value="square">{t(language, 'webcamShapeSquare')}</option>
-              </select>
-            </label>
-            <label>
-              <span>{t(language, 'webcamSize')}</span>
-              <input
-                type="range"
-                min="120"
-                max="320"
-                value={settings.webcamSize}
-                onChange={(event) => onUpdateSetting({ webcamSize: Number(event.currentTarget.value) })}
-              />
-            </label>
-            <label>
-              <span>{t(language, 'webcamFrameColor')}</span>
-              <input
-                type="color"
-                value={settings.webcamFrameColor}
-                onChange={(event) => onUpdateSetting({ webcamFrameColor: event.currentTarget.value })}
-              />
-            </label>
-            <p className="settings-hint opfs-hint">{t(language, 'videoOpfsHint')}</p>
-            <p className="settings-hint">{t(language, 'videoFormatHint')}</p>
-          </div>
-        )}
-
-        {settingsTab === 'audio' && (
-          <div className="settings-grid">
-            <label>
-              <input
-                type="checkbox"
-                checked={settings.recordAudio}
-                onChange={(event) => onUpdateSetting({ recordAudio: event.currentTarget.checked })}
-              />
-              <span>{t(language, 'recordAudio')}</span>
-            </label>
-            <label>
-              <span>{t(language, 'audioSource')}</span>
-              <select
-                value={settings.audioSource}
-                onChange={(event) => onUpdateSetting({ audioSource: event.currentTarget.value as AppSettings['audioSource'] })}
-              >
-                <option value="none">{t(language, 'audioSourceNone')}</option>
-                <option value="microphone">{t(language, 'audioSourceMic')}</option>
-                <option value="system">{t(language, 'audioSourceSystem')}</option>
-                <option value="both">{t(language, 'audioSourceBoth')}</option>
-              </select>
-            </label>
-            <label>
-              <span>{t(language, 'microphoneGain')}</span>
-              <input
-                type="range"
-                min="50"
-                max="200"
-                value={settings.microphoneGain}
-                onChange={(event) => onUpdateSetting({ microphoneGain: Number(event.currentTarget.value) })}
-              />
-            </label>
-          </div>
         )}
 
         {settingsTab === 'formats' && (

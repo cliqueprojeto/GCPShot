@@ -1,12 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AppSettings, CaptureExportPayload, CaptureImagePayload, CaptureMode, CaptureResult, RecordMode } from '../shared/capture'
-import type { StudioPickResult } from '../shared/studio'
+import type { StudioPickResult, StudioVideoPickResult } from '../shared/studio'
 
 const api = {
   beginCapture: (mode: CaptureMode = 'region'): Promise<CaptureResult> => ipcRenderer.invoke('capture:begin', mode),
   beginRecord: (mode: RecordMode = 'region'): Promise<CaptureResult> => ipcRenderer.invoke('record:begin', mode),
   cancelCapture: (): Promise<void> => ipcRenderer.invoke('capture:cancel'),
   cancelRecord: (): Promise<void> => ipcRenderer.invoke('record:cancel'),
+  setRecordPassthrough: (enabled: boolean): Promise<void> => ipcRenderer.invoke('record:set-passthrough', enabled),
   saveRecording: (buffer: ArrayBuffer, meta?: { extension?: string }): Promise<CaptureResult> =>
     ipcRenderer.invoke('record:save', buffer, meta),
   copyCapture: (payload: CaptureExportPayload): Promise<CaptureResult> =>
@@ -40,7 +41,9 @@ const api = {
     return () => ipcRenderer.removeListener('capture:image', listener)
   },
   pickStudioImages: (): Promise<StudioPickResult> => ipcRenderer.invoke('studio:pick-images'),
-  exportStudioImage: (dataUrl: string): Promise<CaptureResult> => ipcRenderer.invoke('studio:export-image', dataUrl)
+  exportStudioImage: (dataUrl: string): Promise<CaptureResult> => ipcRenderer.invoke('studio:export-image', dataUrl),
+  pickStudioVideos: (): Promise<StudioVideoPickResult> => ipcRenderer.invoke('studio:pick-videos'),
+  exportStudioVideoProject: (project: string): Promise<CaptureResult> => ipcRenderer.invoke('studio:export-video-project', project)
 }
 
 contextBridge.exposeInMainWorld('gcpshot', api)

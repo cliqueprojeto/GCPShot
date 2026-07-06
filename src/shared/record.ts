@@ -10,6 +10,7 @@ export type RecordingSettings = {
   recordAudio: boolean
   audioSource: AudioSource
   microphoneDeviceId: string
+  systemAudioDeviceId: string
   microphoneGain: number
   webcamEnabled: boolean
   webcamShape: WebcamShape
@@ -84,6 +85,7 @@ export const defaultRecordingSettings: RecordingSettings = {
   recordAudio: true,
   audioSource: 'microphone',
   microphoneDeviceId: '',
+  systemAudioDeviceId: '',
   microphoneGain: 100,
   webcamEnabled: false,
   webcamShape: 'circle',

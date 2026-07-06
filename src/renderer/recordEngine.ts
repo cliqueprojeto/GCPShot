@@ -15,6 +15,7 @@ type Point = { x: number; y: number }
 type CompositorOptions = {
   screenVideo: HTMLVideoElement
   cropRect: CaptureRect
+  sourceOrigin: Point
   outputWidth: number
   outputHeight: number
   webcamVideo?: HTMLVideoElement | null
@@ -50,6 +51,9 @@ export class RegionRecorder {
   private codec: ResolvedRecordingCodec
   private isPaused = false
   private audioStream: MediaStream | null = null
+  private systemAudioStream: MediaStream | null = null
+  private audioContext: AudioContext | null = null
+  private canvasStream: MediaStream | null = null
 
   constructor(private settings: AppSettings) {
     this.codec = resolveRecordingCodec(settings.recordAudio && settings.audioSource !== 'none')
@@ -71,7 +75,7 @@ export class RegionRecorder {
     return this.codec
   }
 
-  async attachScreenStream(sourceId: string, cropRect: CaptureRect): Promise<MediaStream> {
+  async attachScreenStream(sourceId: string, cropRect: CaptureRect, sourceOrigin: Point = { x: 0, y: 0 }): Promise<MediaStream> {
     const screenStream = await navigator.mediaDevices.getUserMedia({
       audio: false,
       video: {
@@ -96,6 +100,7 @@ export class RegionRecorder {
     this.compositor = {
       screenVideo,
       cropRect,
+      sourceOrigin,
       outputWidth: target.width,
       outputHeight: target.height,
       getActions: () => [],
@@ -113,28 +118,91 @@ export class RegionRecorder {
     this.compositor = { ...this.compositor, ...options }
   }
 
-  async attachAudio(): Promise<MediaStream | null> {
+  async attachAudio(sourceId?: string): Promise<MediaStream | null> {
     if (!this.settings.recordAudio || this.settings.audioSource === 'none') {
       return null
+    }
+
+    const streams: MediaStream[] = []
+
+    if ((this.settings.audioSource === 'system' || this.settings.audioSource === 'both') && sourceId) {
+      try {
+        this.systemAudioStream = await navigator.mediaDevices.getUserMedia({
+          video: false,
+          audio: {
+            // @ts-expect-error Electron desktop audio constraints
+            mandatory: {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: sourceId
+            }
+          }
+        })
+        streams.push(this.systemAudioStream)
+      } catch {
+        // Some Windows audio devices do not expose desktop audio to Chromium.
+      }
     }
 
     if (this.settings.audioSource === 'microphone' || this.settings.audioSource === 'both') {
       const constraints: MediaStreamConstraints = {
         audio: this.settings.microphoneDeviceId
-          ? { deviceId: { exact: this.settings.microphoneDeviceId } }
-          : true
+          ? {
+              deviceId: { exact: this.settings.microphoneDeviceId },
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false
+            }
+          : {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false
+            }
       }
 
-      this.audioStream = await navigator.mediaDevices.getUserMedia(constraints)
-      return this.audioStream
+      try {
+        this.audioStream = await navigator.mediaDevices.getUserMedia(constraints)
+      } catch {
+        this.audioStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false
+          }
+        })
+      }
+      streams.push(this.audioStream)
     }
 
-    return null
+    if (streams.length === 0) {
+      return null
+    }
+
+    if (streams.length === 1 && this.settings.microphoneGain === 100) {
+      return streams[0] ?? null
+    }
+
+    this.audioContext = new AudioContext()
+    const destination = this.audioContext.createMediaStreamDestination()
+
+    streams.forEach((stream) => {
+      const source = this.audioContext!.createMediaStreamSource(stream)
+      if (stream === this.audioStream) {
+        const gain = this.audioContext!.createGain()
+        gain.gain.value = Math.max(0, this.settings.microphoneGain) / 100
+        source.connect(gain).connect(destination)
+        return
+      }
+
+      source.connect(destination)
+    })
+
+    return destination.stream
   }
 
   async start(canvasStream: MediaStream, audioStream: MediaStream | null): Promise<void> {
     this.codec = resolveRecordingCodec(Boolean(audioStream))
     await this.sink.open(this.codec.extension)
+    this.canvasStream = canvasStream
 
     const tracks = [...canvasStream.getVideoTracks()]
     if (audioStream) {
@@ -249,6 +317,21 @@ export class RegionRecorder {
       this.audioStream = null
     }
 
+    if (this.systemAudioStream) {
+      this.systemAudioStream.getTracks().forEach((track) => track.stop())
+      this.systemAudioStream = null
+    }
+
+    if (this.audioContext) {
+      void this.audioContext.close()
+      this.audioContext = null
+    }
+
+    if (this.canvasStream) {
+      this.canvasStream.getTracks().forEach((track) => track.stop())
+      this.canvasStream = null
+    }
+
     this.compositor = null
   }
 
@@ -277,7 +360,7 @@ export class RegionRecorder {
       return
     }
 
-    const { screenVideo, cropRect, outputWidth, outputHeight } = compositor
+    const { screenVideo, cropRect, outputWidth, outputHeight, sourceOrigin } = compositor
     const scaleX = outputWidth / cropRect.width
     const scaleY = outputHeight / cropRect.height
 
@@ -295,7 +378,7 @@ export class RegionRecorder {
 
     this.context.save()
     this.context.scale(scaleX, scaleY)
-    this.context.translate(-cropRect.x, -cropRect.y)
+    this.context.translate(-(sourceOrigin.x + cropRect.x), -(sourceOrigin.y + cropRect.y))
 
     compositor.getActions().forEach((action) => {
       compositor.drawAction(this.context, action, 1, 1, screenVideo)
@@ -306,16 +389,28 @@ export class RegionRecorder {
     if (compositor.webcamVideo && compositor.webcamRect) {
       const { x, y, size, shape, color } = compositor.webcamRect
       const video = compositor.webcamVideo
+      const targetX = (x - sourceOrigin.x - cropRect.x) * scaleX
+      const targetY = (y - sourceOrigin.y - cropRect.y) * scaleY
+      const targetWidth = size * scaleX
+      const targetHeight = size * scaleY
 
       this.context.save()
       this.context.beginPath()
 
       if (shape === 'circle') {
-        this.context.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2)
+        this.context.ellipse(
+          targetX + targetWidth / 2,
+          targetY + targetHeight / 2,
+          targetWidth / 2,
+          targetHeight / 2,
+          0,
+          0,
+          Math.PI * 2
+        )
       } else if (shape === 'rounded') {
-        this.context.roundRect(x, y, size, size, size * 0.18)
+        this.context.roundRect(targetX, targetY, targetWidth, targetHeight, Math.min(targetWidth, targetHeight) * 0.18)
       } else {
-        this.context.rect(x, y, size, size)
+        this.context.rect(targetX, targetY, targetWidth, targetHeight)
       }
 
       this.context.closePath()
@@ -323,7 +418,24 @@ export class RegionRecorder {
       this.context.strokeStyle = color
       this.context.stroke()
       this.context.clip()
-      this.context.drawImage(video, x, y, size, size)
+      const videoWidth = video.videoWidth || targetWidth
+      const videoHeight = video.videoHeight || targetHeight
+      const sourceAspect = videoWidth / Math.max(1, videoHeight)
+      const targetAspect = targetWidth / Math.max(1, targetHeight)
+      let sourceX = 0
+      let sourceY = 0
+      let sourceWidth = videoWidth
+      let sourceHeight = videoHeight
+
+      if (sourceAspect > targetAspect) {
+        sourceWidth = videoHeight * targetAspect
+        sourceX = (videoWidth - sourceWidth) / 2
+      } else {
+        sourceHeight = videoWidth / targetAspect
+        sourceY = (videoHeight - sourceHeight) / 2
+      }
+
+      this.context.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, targetX, targetY, targetWidth, targetHeight)
       this.context.restore()
     }
   }

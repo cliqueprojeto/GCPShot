@@ -262,8 +262,6 @@ function createTray(): void {
     Menu.buildFromTemplate([
       { label: 'Capturar região', click: () => void beginCapture('region') },
       { label: 'Capturar tela inteira', click: () => void beginCapture('fullscreen') },
-      { label: 'Gravar região', click: () => void beginRecord('region') },
-      { label: 'Gravar tela inteira', click: () => void beginRecord('fullscreen') },
       { label: 'Abrir GCPShot', click: showMainWindow },
       { type: 'separator' },
       {
@@ -358,7 +356,8 @@ async function beginOverlay(mode: CaptureMode, overlay: 'capture' | 'record'): P
       width: area.width,
       height: area.height,
       displayId: display.id,
-      isPrimary: display.id === primaryDisplayId
+      isPrimary: display.id === primaryDisplayId,
+      screenSourceId: source.id
     }
   })
 
@@ -371,10 +370,10 @@ async function beginOverlay(mode: CaptureMode, overlay: 'capture' | 'record'): P
     fullscreen: false,
     resizable: false,
     movable: false,
-    transparent: false,
+    transparent: overlay === 'record',
     alwaysOnTop: true,
     skipTaskbar: true,
-    backgroundColor: '#05010a',
+    backgroundColor: overlay === 'record' ? '#00000000' : '#05010a',
     icon: getAppIcon(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -385,6 +384,9 @@ async function beginOverlay(mode: CaptureMode, overlay: 'capture' | 'record'): P
   })
 
   window.setMenu(null)
+  if (overlay === 'record') {
+    window.setContentProtection(true)
+  }
   window.setBounds({ x: minX, y: minY, width: desktopWidth, height: desktopHeight })
   window.setAlwaysOnTop(true, 'screen-saver')
   window.webContents.once('did-finish-load', () => {
@@ -478,6 +480,11 @@ function registerIpc(): void {
   ipcMain.handle('record:cancel', () => {
     closeCaptureWindow()
     return { ok: true }
+  })
+  ipcMain.handle('record:set-passthrough', (_event, enabled: boolean) => {
+    if (captureWindow && !captureWindow.isDestroyed()) {
+      captureWindow.setIgnoreMouseEvents(enabled, { forward: true })
+    }
   })
   ipcMain.handle(
     'record:save',
@@ -681,6 +688,55 @@ function registerIpc(): void {
     notify('Estúdio GCPShot', 'Imagem exportada com sucesso.')
     return { ok: true, path: filePath }
   })
+  ipcMain.handle('studio:pick-videos', async (): Promise<{ ok: boolean; files: Array<{ name: string; dataUrl: string; mimeType: string }>; error?: string }> => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow ?? undefined, {
+      title: 'Importar videos para o estudio',
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Videos', extensions: ['mp4', 'webm', 'mov', 'mkv'] }]
+    })
+
+    if (canceled || !filePaths.length) {
+      return { ok: false, files: [], error: 'Importacao cancelada.' }
+    }
+
+    const files = await Promise.all(
+      filePaths.map(async (filePath) => {
+        const buffer = await readFile(filePath)
+        const extension = extname(filePath).toLowerCase()
+        const mime =
+          extension === '.webm'
+            ? 'video/webm'
+            : extension === '.mov'
+              ? 'video/quicktime'
+              : extension === '.mkv'
+                ? 'video/x-matroska'
+                : 'video/mp4'
+
+        return {
+          name: basename(filePath),
+          dataUrl: `data:${mime};base64,${buffer.toString('base64')}`,
+          mimeType: mime
+        }
+      })
+    )
+
+    return { ok: true, files }
+  })
+  ipcMain.handle('studio:export-video-project', async (_event, project: string): Promise<CaptureResult> => {
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow ?? undefined, {
+      title: 'Exportar projeto de video',
+      defaultPath: `GCPShot-Video-Studio-${new Date().toISOString().replace(/[:.]/g, '-')}.gcpshot-video.json`,
+      filters: [{ name: 'Projeto de video GCPShot', extensions: ['json'] }]
+    })
+
+    if (canceled || !filePath) {
+      return { ok: false, error: 'Exportacao cancelada.' }
+    }
+
+    await writeFile(filePath, project, 'utf8')
+    notify('Estudio GCPShot', 'Projeto de video exportado.')
+    return { ok: true, path: filePath }
+  })
 }
 
 function registerShortcuts(): void {
@@ -694,18 +750,8 @@ function registerShortcuts(): void {
     void beginCapture('fullscreen')
   }
 
-  const startRecordRegion = (): void => {
-    void beginRecord('region')
-  }
-
-  const startRecordFullscreen = (): void => {
-    void beginRecord('fullscreen')
-  }
-
   globalShortcut.register(settings.captureShortcut, startRegion)
   globalShortcut.register(settings.fullscreenShortcut, startFullscreen)
-  globalShortcut.register(settings.recordRegionShortcut, startRecordRegion)
-  globalShortcut.register(settings.recordFullscreenShortcut, startRecordFullscreen)
 
   if (settings.printScreenShortcut) {
     globalShortcut.register('PrintScreen', start)

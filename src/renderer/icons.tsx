@@ -67,7 +67,7 @@ export function ToolIcon({ tool }: { tool: EditorTool }): JSX.Element {
 export function ActionIcon({
   type
 }: {
-  type: 'copy' | 'save' | 'print' | 'whatsapp' | 'undo' | 'redo' | 'close' | 'settings' | 'shapes'
+  type: 'copy' | 'save' | 'print' | 'whatsapp' | 'undo' | 'redo' | 'clear' | 'close' | 'settings' | 'shapes'
 }): JSX.Element {
   const common = {
     fill: 'none',
@@ -113,6 +113,13 @@ export function ActionIcon({
         <>
           <path {...common} d="M15 14l5-5-5-5" />
           <path {...common} d="M20 9H9" />
+        </>
+      )}
+      {type === 'clear' && (
+        <>
+          <path {...common} d="M4 7h16" />
+          <path {...common} d="M9 7V5h6v2M7 7l1 13h8l1-13" />
+          <path {...common} d="M10 11v5M14 11v5" />
         </>
       )}
       {type === 'settings' && (

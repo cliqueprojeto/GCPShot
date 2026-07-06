@@ -9,6 +9,7 @@ export class OpfsRecordingSink {
   private useMemoryFallback = false
   private memoryChunks: Blob[] = []
   private bytesWritten = 0
+  private pendingWrite: Promise<void> = Promise.resolve()
 
   static isSupported(): boolean {
     return typeof navigator.storage?.getDirectory === 'function'
@@ -39,29 +40,37 @@ export class OpfsRecordingSink {
       return
     }
 
-    if (this.useMemoryFallback) {
-      this.memoryChunks.push(chunk)
-      this.bytesWritten += chunk.size
-      return
-    }
+    this.pendingWrite = this.pendingWrite.then(async () => {
+      if (this.useMemoryFallback) {
+        this.memoryChunks.push(chunk)
+        this.bytesWritten += chunk.size
+        return
+      }
 
-    await this.writable!.write(chunk)
-    this.bytesWritten += chunk.size
+      await this.writable!.write(chunk)
+      this.bytesWritten += chunk.size
+    })
+
+    return this.pendingWrite
   }
 
   async close(mimeType: string): Promise<Blob> {
+    await this.pendingWrite
+
     if (this.useMemoryFallback) {
       return new Blob(this.memoryChunks, { type: mimeType })
     }
 
     await this.writable!.close()
     this.writable = null
-    return this.fileHandle!.getFile()
+    const file = await this.fileHandle!.getFile()
+    return new Blob([await file.arrayBuffer()], { type: mimeType })
   }
 
   async dispose(): Promise<void> {
     if (!this.fileName || this.useMemoryFallback) {
       this.memoryChunks = []
+      this.bytesWritten = 0
       return
     }
 
@@ -74,5 +83,8 @@ export class OpfsRecordingSink {
 
     this.fileName = ''
     this.fileHandle = null
+    this.memoryChunks = []
+    this.bytesWritten = 0
+    this.pendingWrite = Promise.resolve()
   }
 }

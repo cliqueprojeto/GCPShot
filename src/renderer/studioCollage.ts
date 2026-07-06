@@ -1,6 +1,7 @@
 import type { StudioImage } from './studioStorage'
 
 export type CollageLayoutId = '2col' | '2row' | '3col' | 'grid-2x2' | 'hero-left' | 'hero-top'
+export type ImageFilterPreset = 'none' | 'pb' | 'sepia' | 'noir' | 'retro' | 'chrome' | 'film' | 'warm'
 
 type NormalizedCell = {
   x: number
@@ -14,6 +15,21 @@ export type CollageLayout = {
   slots: number
   aspect: number
   cells: NormalizedCell[]
+}
+
+export type CollageSlotPosition = {
+  x: number
+  y: number
+}
+
+export type ImageLayer = {
+  id: string
+  image: StudioImage
+  x: number
+  y: number
+  scale: number
+  rotation: number
+  opacity: number
 }
 
 export const collageLayouts: CollageLayout[] = [
@@ -90,13 +106,16 @@ function loadImage(dataUrl: string): Promise<HTMLImageElement> {
 function drawCover(
   context: CanvasRenderingContext2D,
   image: HTMLImageElement,
-  rect: { x: number; y: number; width: number; height: number }
+  rect: { x: number; y: number; width: number; height: number },
+  position: CollageSlotPosition = { x: 0.5, y: 0.5 }
 ): void {
   const scale = Math.max(rect.width / image.naturalWidth, rect.height / image.naturalHeight)
   const width = image.naturalWidth * scale
   const height = image.naturalHeight * scale
-  const x = rect.x + (rect.width - width) / 2
-  const y = rect.y + (rect.height - height) / 2
+  const offsetX = Math.min(1, Math.max(0, position.x))
+  const offsetY = Math.min(1, Math.max(0, position.y))
+  const x = rect.x - Math.max(0, width - rect.width) * offsetX
+  const y = rect.y - Math.max(0, height - rect.height) * offsetY
 
   context.save()
   context.beginPath()
@@ -135,6 +154,7 @@ export async function renderCollage(options: {
   gap: number
   padding: number
   background: string
+  slotPositions?: CollageSlotPosition[]
   outputWidth?: number
 }): Promise<string> {
   const layout = collageLayouts.find((item) => item.id === options.layoutId) ?? collageLayouts[0]
@@ -161,10 +181,41 @@ export async function renderCollage(options: {
     }
 
     const image = await loadImage(imageMeta.dataUrl)
-    drawCover(context, image, rects[index]!)
+    drawCover(context, image, rects[index]!, options.slotPositions?.[index])
   }
 
   return canvas.toDataURL('image/png')
+}
+
+function filterPresetToCanvasFilter(
+  preset: ImageFilterPreset | undefined,
+  adjustments: { brightness: number; contrast: number; saturation: number }
+): string {
+  const base = [
+    `brightness(${100 + adjustments.brightness}%)`,
+    `contrast(${100 + adjustments.contrast}%)`,
+    `saturate(${100 + adjustments.saturation}%)`
+  ]
+
+  switch (preset) {
+    case 'pb':
+      return [...base, 'grayscale(100%)'].join(' ')
+    case 'sepia':
+      return [...base, 'sepia(82%)', 'contrast(108%)', 'saturate(92%)'].join(' ')
+    case 'noir':
+      return [...base, 'grayscale(100%)', 'contrast(132%)', 'brightness(88%)'].join(' ')
+    case 'retro':
+      return [...base, 'sepia(38%)', 'saturate(138%)', 'contrast(112%)'].join(' ')
+    case 'chrome':
+      return [...base, 'saturate(158%)', 'contrast(124%)', 'brightness(104%)'].join(' ')
+    case 'film':
+      return [...base, 'sepia(18%)', 'contrast(118%)', 'saturate(86%)'].join(' ')
+    case 'warm':
+      return [...base, 'sepia(22%)', 'saturate(118%)', 'brightness(106%)'].join(' ')
+    case 'none':
+    default:
+      return base.join(' ')
+  }
 }
 
 export async function applyImageAdjustments(
@@ -175,6 +226,7 @@ export async function applyImageAdjustments(
     saturation: number
     rotation: number
     flipHorizontal: boolean
+    filterPreset?: ImageFilterPreset
   },
   options?: {
     maxSide?: number
@@ -207,7 +259,7 @@ export async function applyImageAdjustments(
   }
 
   context.clearRect(0, 0, canvas.width, canvas.height)
-  context.filter = `brightness(${100 + adjustments.brightness}%) contrast(${100 + adjustments.contrast}%) saturate(${100 + adjustments.saturation}%)`
+  context.filter = filterPresetToCanvasFilter(adjustments.filterPreset, adjustments)
   context.translate(canvas.width / 2, canvas.height / 2)
   context.rotate((rotation * Math.PI) / 180)
   context.scale(adjustments.flipHorizontal ? -1 : 1, 1)
@@ -223,6 +275,42 @@ export async function applyImageAdjustments(
   const format = options?.format ?? 'png'
   if (format === 'jpeg') {
     return canvas.toDataURL('image/jpeg', options?.quality ?? 0.9)
+  }
+
+  return canvas.toDataURL('image/png')
+}
+
+export async function renderLayerComposition(options: {
+  layers: ImageLayer[]
+  background: string
+  outputWidth?: number
+  outputHeight?: number
+}): Promise<string> {
+  const outputWidth = options.outputWidth ?? 1600
+  const outputHeight = options.outputHeight ?? 1000
+  const canvas = document.createElement('canvas')
+  canvas.width = outputWidth
+  canvas.height = outputHeight
+
+  const context = canvas.getContext('2d')
+  if (!context) {
+    throw new Error('canvas-unavailable')
+  }
+
+  context.fillStyle = options.background
+  context.fillRect(0, 0, outputWidth, outputHeight)
+
+  for (const layer of options.layers) {
+    const image = await loadImage(layer.image.dataUrl)
+    const baseScale = Math.min(outputWidth / image.naturalWidth, outputHeight / image.naturalHeight) * 0.72
+    const drawWidth = image.naturalWidth * baseScale * layer.scale
+    const drawHeight = image.naturalHeight * baseScale * layer.scale
+    context.save()
+    context.globalAlpha = Math.min(1, Math.max(0, layer.opacity))
+    context.translate(layer.x * outputWidth, layer.y * outputHeight)
+    context.rotate((layer.rotation * Math.PI) / 180)
+    context.drawImage(image, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight)
+    context.restore()
   }
 
   return canvas.toDataURL('image/png')

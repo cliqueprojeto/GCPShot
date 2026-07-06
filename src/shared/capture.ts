@@ -16,6 +16,7 @@ export type CaptureSegment = {
   height: number
   displayId: number
   isPrimary: boolean
+  screenSourceId: string
 }
 
 export type CaptureImagePayload = {
@@ -86,6 +87,13 @@ export type CaptureAction =
       at: { x: number; y: number }
       number: number
     }
+  | {
+      id: string
+      tool: 'cursorHighlight' | 'cursorSpotlight'
+      color: string
+      size: number
+      at: { x: number; y: number }
+    }
 
 export type CaptureExportPayload = {
   dataUrl: string
@@ -139,6 +147,7 @@ export type AppSettings = {
   recordAudio: boolean
   audioSource: AudioSource
   microphoneDeviceId: string
+  systemAudioDeviceId: string
   microphoneGain: number
   webcamEnabled: boolean
   webcamShape: WebcamShape
@@ -225,6 +234,7 @@ export const defaultAppSettings: AppSettings = {
   recordAudio: true,
   audioSource: 'microphone',
   microphoneDeviceId: '',
+  systemAudioDeviceId: '',
   microphoneGain: 100,
   webcamEnabled: false,
   webcamShape: 'circle',

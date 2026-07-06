@@ -16,7 +16,6 @@ import packageJson from '../../package.json'
 import logoGcp from './assets/logo-gcp.png'
 import { ContributionPanel, GCP_SITE_URL } from './ContributionPanel'
 import { LandingButton } from './LandingButton'
-import { RecordOverlay } from './RecordOverlay'
 import { Studio } from './Studio'
 import { pushCaptureToStudioAsync } from './studioStorage'
 import {
@@ -48,7 +47,6 @@ type SelectionAdjustState = {
 }
 
 const isCaptureMode = new URLSearchParams(window.location.search).get('capture') === '1'
-const isRecordMode = new URLSearchParams(window.location.search).get('record') === '1'
 const initialCaptureMode = (new URLSearchParams(window.location.search).get('mode') ?? 'region') as CaptureMode
 const palettes = {
   GCP: ['#7b2ff7', '#d94cff', '#ffcf70', '#ffffff', '#2b0f43'],
@@ -77,6 +75,11 @@ const stampPresets = [
   { label: 'ATENÇÃO', tone: 'warning' },
   { label: 'GCP', tone: 'custom' }
 ] as const
+
+type StampPreset = {
+  label: string
+  tone: StampTone
+}
 
 const toolsWithOptions: EditorTool[] = ['bubble', 'stamp', 'magnifier', 'blur', 'pixelate']
 const toolsWithOutlineToggle: EditorTool[] = ['blur', 'pixelate', 'magnifier']
@@ -248,11 +251,6 @@ function Landing(): JSX.Element {
     )
   }
 
-  async function startRecord(mode: 'region' | 'fullscreen'): Promise<void> {
-    const result = await window.gcpshot.beginRecord(mode)
-    setStatus(result.ok ? t(language, 'recordSelectArea') : result.error ?? t(language, 'recordFailed'))
-  }
-
   async function openStudio(): Promise<void> {
     setView('studio')
   }
@@ -324,11 +322,10 @@ function Landing(): JSX.Element {
               {t(language, 'settings')}
             </button>
             <LandingButton
-              label={t(language, 'captureRegion')}
-              shortcut={settings.captureShortcut}
-              variant="primary"
+              label={t(language, 'openStudio')}
+              shortcut={settings.studioShortcut}
               className="compact"
-              onClick={() => void startCapture('region')}
+              onClick={() => void openStudio()}
             />
           </div>
         </header>
@@ -350,21 +347,6 @@ function Landing(): JSX.Element {
                 label={t(language, 'captureFullscreen')}
                 shortcut={settings.fullscreenShortcut}
                 onClick={() => void startCapture('fullscreen')}
-              />
-              <LandingButton
-                label={t(language, 'recordRegion')}
-                shortcut={settings.recordRegionShortcut}
-                onClick={() => void startRecord('region')}
-              />
-              <LandingButton
-                label={t(language, 'recordFullscreen')}
-                shortcut={settings.recordFullscreenShortcut}
-                onClick={() => void startRecord('fullscreen')}
-              />
-              <LandingButton
-                label={t(language, 'openStudio')}
-                shortcut={settings.studioShortcut}
-                onClick={() => void openStudio()}
               />
               {settings.printScreenShortcut && <span className="shortcut-pill">Print Screen</span>}
             </div>
@@ -445,6 +427,8 @@ function CaptureOverlay(): JSX.Element {
   const [magnifierHover, setMagnifierHover] = useState<Point | null>(null)
   const [stampLabel, setStampLabel] = useState('APROVADO')
   const [stampTone, setStampTone] = useState<StampTone>('approved')
+  const [stampSize, setStampSize] = useState(34)
+  const [customStampPresets, setCustomStampPresets] = useState<StampPreset[]>([])
   const [nextNumStamp, setNextNumStamp] = useState(1)
   const [actions, setActions] = useState<CaptureAction[]>([])
   const [redoStack, setRedoStack] = useState<CaptureAction[]>([])
@@ -461,6 +445,15 @@ function CaptureOverlay(): JSX.Element {
   const showToolOptions = toolsWithOptions.includes(tool)
   const showOutlineToggle = toolsWithOutlineToggle.includes(tool)
   const hasOptionsRow = openMenu === 'tool-options' && showToolOptions
+  const allStampPresets = useMemo<StampPreset[]>(
+    () => [
+      ...stampPresets,
+      ...customStampPresets.filter(
+        (custom) => !stampPresets.some((preset) => preset.label === custom.label && preset.tone === custom.tone)
+      )
+    ],
+    [customStampPresets]
+  )
 
   const activeRect = useMemo(() => {
     if (selectedRect) {
@@ -531,6 +524,8 @@ function CaptureOverlay(): JSX.Element {
         magnifierHeight: number
         stampLabel: string
         stampTone: StampTone
+        stampSize: number
+        customStampPresets: StampPreset[]
       }>
 
       if (saved.paletteName && palettes[saved.paletteName]) {
@@ -574,6 +569,12 @@ function CaptureOverlay(): JSX.Element {
       if (saved.stampTone) {
         setStampTone(saved.stampTone)
       }
+      if (saved.stampSize) {
+        setStampSize(saved.stampSize)
+      }
+      if (Array.isArray(saved.customStampPresets)) {
+        setCustomStampPresets(saved.customStampPresets)
+      }
     } catch {
       // Keep defaults if persisted editor settings are malformed.
     }
@@ -595,7 +596,9 @@ function CaptureOverlay(): JSX.Element {
         magnifierWidth,
         magnifierHeight,
         stampLabel,
-        stampTone
+        stampTone,
+        stampSize,
+        customStampPresets
       })
     )
   }, [
@@ -611,11 +614,21 @@ function CaptureOverlay(): JSX.Element {
     privacyIntensity,
     size,
     stampLabel,
+    stampSize,
+    customStampPresets,
     stampTone
   ])
 
   useEffect(() => {
     if (!payload || initialCaptureMode !== 'fullscreen') {
+      return
+    }
+
+    if (payload.segments.length > 1) {
+      if (selectedRect) {
+        return
+      }
+      setStatus('Escolha qual monitor capturar.')
       return
     }
 
@@ -629,7 +642,7 @@ function CaptureOverlay(): JSX.Element {
     setTool('pen')
     setOpenMenu(null)
     setStatus(t(language, 'fullscreenSelected'))
-  }, [payload, language])
+  }, [payload, language, selectedRect])
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
@@ -642,8 +655,15 @@ function CaptureOverlay(): JSX.Element {
         return
       }
 
-      if (event.key === 'Enter' && selectedRect && payload) {
-        void copySelection()
+      if (event.key === 'Enter' && pendingText) {
+        event.preventDefault()
+        commitPendingText()
+        return
+      }
+
+      if (event.key === 'Delete' && event.altKey && selectedRect) {
+        event.preventDefault()
+        clearAllActions()
         return
       }
 
@@ -761,6 +781,23 @@ function CaptureOverlay(): JSX.Element {
     setRecordingShortcut(null)
   }
 
+  function saveCurrentStampPreset(): void {
+    const label = stampLabel.trim().toUpperCase()
+    if (!label) {
+      return
+    }
+
+    setStampLabel(label)
+    setStampTone('custom')
+    setCustomStampPresets((current) => {
+      if (current.some((preset) => preset.label === label)) {
+        return current
+      }
+
+      return [...current, { label, tone: 'custom' }]
+    })
+  }
+
   function pointInsideSelection(point: Point): boolean {
     if (!selectedRect) {
       return false
@@ -784,7 +821,7 @@ function CaptureOverlay(): JSX.Element {
         id: crypto.randomUUID(),
         tool,
         color,
-        size: Math.max(14, size * 3),
+        size: stampSize,
         at: point,
         label: stampLabel,
         tone: stampTone
@@ -1116,6 +1153,19 @@ function CaptureOverlay(): JSX.Element {
       return currentRedoStack.slice(0, -1)
     })
     setStatus(t(language, 'redoDone'))
+  }
+
+  function clearAllActions(): void {
+    if (actions.length === 0 && redoStack.length === 0 && !pendingText) {
+      return
+    }
+
+    setActions([])
+    setRedoStack([])
+    setDraftAction(null)
+    setPendingText(null)
+    setMagnifierHover(null)
+    setStatus(t(language, 'clearAllDone'))
   }
 
   function translateAction(action: CaptureAction, dx: number, dy: number): CaptureAction {
@@ -1645,6 +1695,7 @@ function CaptureOverlay(): JSX.Element {
     tool === 'select' && selectedRect && selectionHoverHandle
       ? cursorForResizeHandle(selectionHoverHandle)
       : undefined
+  const scrimRect = selectedRect ?? activeRect
 
   return (
     <main
@@ -1675,16 +1726,39 @@ function CaptureOverlay(): JSX.Element {
           {captureBackdrop && <img className="screen-backdrop" src={captureBackdrop} alt="" draggable={false} />}
         </>
       )}
-      <div className="capture-scrim" />
+      {scrimRect ? (
+        <div className="capture-scrim-cutout" aria-hidden>
+          <span style={{ left: 0, top: 0, width: '100vw', height: scrimRect.y }} />
+          <span style={{ left: 0, top: scrimRect.y, width: scrimRect.x, height: scrimRect.height }} />
+          <span
+            style={{
+              left: scrimRect.x + scrimRect.width,
+              top: scrimRect.y,
+              width: `calc(100vw - ${scrimRect.x + scrimRect.width}px)`,
+              height: scrimRect.height
+            }}
+          />
+          <span
+            style={{
+              left: 0,
+              top: scrimRect.y + scrimRect.height,
+              width: '100vw',
+              height: `calc(100vh - ${scrimRect.y + scrimRect.height}px)`
+            }}
+          />
+        </div>
+      ) : (
+        <div className="capture-scrim" />
+      )}
 
-      {(selectedRect ?? activeRect) && (
+      {scrimRect && (
         <div
           className="selection-box"
           style={{
-            left: (selectedRect ?? activeRect)!.x,
-            top: (selectedRect ?? activeRect)!.y,
-            width: (selectedRect ?? activeRect)!.width,
-            height: (selectedRect ?? activeRect)!.height
+            left: scrimRect.x,
+            top: scrimRect.y,
+            width: scrimRect.width,
+            height: scrimRect.height
           }}
         />
       )}
@@ -1851,12 +1925,9 @@ function CaptureOverlay(): JSX.Element {
                     y={y}
                     width={width}
                     height={height}
-                    fill={action.tool === 'blur' ? 'rgba(255,255,255,0.18)' : 'url(#pixel-pattern)'}
+                    fill="none"
                     {...outlineProps}
                   />
-                  <text x={x + 10} y={y + 22} fill="white" fontSize="13" fontWeight="800">
-                    {action.tool === 'blur' ? 'BLUR' : 'PIXEL'}
-                  </text>
                 </g>
               )
             }
@@ -2033,6 +2104,7 @@ function CaptureOverlay(): JSX.Element {
             const y = Math.min(action.from.y, action.to.y)
             const width = Math.abs(action.to.x - action.from.x)
             const height = Math.abs(action.to.y - action.from.y)
+            const pixelSize = Math.max(6, action.size * 3)
 
             return (
               <div
@@ -2053,11 +2125,26 @@ function CaptureOverlay(): JSX.Element {
                   height,
                   borderColor: action.color,
                   ['--privacy-strength' as string]: `${Math.max(3, action.size * 1.6)}px`,
-                  backgroundImage: action.tool === 'pixelate' ? `url(${captureBackdrop})` : undefined,
-                  backgroundPosition: action.tool === 'pixelate' ? `-${x}px -${y}px` : undefined,
-                  backgroundSize: action.tool === 'pixelate' ? `${window.innerWidth / Math.max(1, action.size / 3)}px ${window.innerHeight / Math.max(1, action.size / 3)}px` : undefined
+                  ['--privacy-pixel-size' as string]: `${Math.max(6, action.size * 3)}px`
                 }}
-              />
+              >
+                <span
+                  style={{
+                    backgroundImage: `url(${captureBackdrop})`,
+                    backgroundPosition:
+                      action.tool === 'pixelate'
+                        ? `-${x / pixelSize}px -${y / pixelSize}px`
+                        : `-${x}px -${y}px`,
+                    backgroundSize:
+                      action.tool === 'pixelate'
+                        ? `${window.innerWidth / pixelSize}px ${window.innerHeight / pixelSize}px`
+                        : `${window.innerWidth}px ${window.innerHeight}px`,
+                    width: action.tool === 'pixelate' ? width / pixelSize : '100%',
+                    height: action.tool === 'pixelate' ? height / pixelSize : '100%',
+                    transform: action.tool === 'pixelate' ? `scale(${pixelSize})` : undefined
+                  }}
+                />
+              </div>
             )
           })}
 
@@ -2227,6 +2314,14 @@ function CaptureOverlay(): JSX.Element {
             <button className="icon-tool" onClick={redo} title={actionTooltip(language, 'redoAction', 'redoShortcut', settings)} disabled={redoStack.length === 0}>
               <ActionIcon type="redo" />
             </button>
+            <button
+              className="icon-tool danger"
+              onClick={clearAllActions}
+              title={`${t(language, 'clearAllAction')} (Alt+Delete)`}
+              disabled={actions.length === 0 && redoStack.length === 0 && !pendingText}
+            >
+              <ActionIcon type="clear" />
+            </button>
             <button className="icon-tool" onClick={() => setSettingsOpen(true)} title={t(language, 'settings')}>
               <ActionIcon type="settings" />
             </button>
@@ -2349,7 +2444,7 @@ function CaptureOverlay(): JSX.Element {
                       setStampLabel(label)
                     }}
                   >
-                    {stampPresets.map((stamp) => (
+                    {allStampPresets.map((stamp) => (
                       <option key={`${stamp.tone}:${stamp.label}`} value={`${stamp.tone}:${stamp.label}`}>
                         {stamp.label}
                       </option>
@@ -2365,6 +2460,20 @@ function CaptureOverlay(): JSX.Element {
                     }}
                     placeholder={t(language, 'stampPlaceholder')}
                   />
+                  <label className="dock-slider-row stamp-size-row">
+                    <span>Tamanho: {stampSize}px</span>
+                    <input
+                      className="dock-slider"
+                      type="range"
+                      min="18"
+                      max="96"
+                      value={stampSize}
+                      onChange={(event) => setStampSize(Number(event.currentTarget.value))}
+                    />
+                  </label>
+                  <button type="button" className="toolbar-menu-button text-button" onClick={saveCurrentStampPreset}>
+                    Salvar modelo
+                  </button>
                 </>
               )}
             </div>
@@ -2413,6 +2522,33 @@ function CaptureOverlay(): JSX.Element {
         </form>
       )}
 
+      {initialCaptureMode === 'fullscreen' && payload && payload.segments.length > 1 && !selectedRect && (
+        <div className="monitor-picker capture-monitor-picker">
+          <strong>Escolha qual monitor capturar</strong>
+          <span>Selecione uma tela para abrir o editor de print somente naquele monitor.</span>
+          <div>
+            {payload.segments.map((segment, index) => (
+              <button
+                key={`${segment.x}-${segment.y}-${segment.width}-${segment.height}`}
+                type="button"
+                onClick={() => {
+                  const rect = { x: segment.x, y: segment.y, width: segment.width, height: segment.height }
+                  setSelectedRect(rect)
+                  setToolbarPosition(getToolbarPositionForRect(rect))
+                  setTool('pen')
+                  setOpenMenu(null)
+                  setStatus(t(language, 'fullscreenSelected'))
+                }}
+              >
+                <img src={segment.dataUrl} alt="" />
+                <span>{segment.isPrimary ? `Monitor ${index + 1} - principal` : `Monitor ${index + 1}`}</span>
+                <small>{segment.width} x {segment.height}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="capture-help">
         <strong>{t(language, 'appName')}</strong>
         <span>{status}</span>
@@ -2425,10 +2561,6 @@ function CaptureOverlay(): JSX.Element {
 export function App(): JSX.Element {
   if (isCaptureMode) {
     return <CaptureOverlay />
-  }
-
-  if (isRecordMode) {
-    return <RecordOverlay />
   }
 
   return <Landing />

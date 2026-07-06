@@ -7,8 +7,19 @@ export type StudioImage = {
   createdAt: number
 }
 
+export type StudioVideo = {
+  id: string
+  name: string
+  dataUrl: string
+  mimeType: string
+  duration: number
+  createdAt: number
+}
+
 const STORAGE_KEY = 'gcpshot-studio-library'
+const VIDEO_STORAGE_KEY = 'gcpshot-studio-video-library'
 const MAX_ITEMS = 24
+const MAX_VIDEO_ITEMS = 10
 
 export function loadStudioLibrary(): StudioImage[] {
   try {
@@ -54,6 +65,52 @@ export function addStudioImage(input: {
 
 export function removeStudioImage(id: string): void {
   saveStudioLibrary(loadStudioLibrary().filter((item) => item.id !== id))
+}
+
+export function loadStudioVideos(): StudioVideo[] {
+  try {
+    const raw = localStorage.getItem(VIDEO_STORAGE_KEY)
+    if (!raw) {
+      return []
+    }
+
+    const parsed = JSON.parse(raw) as StudioVideo[]
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+export function saveStudioVideos(items: StudioVideo[]): void {
+  try {
+    localStorage.setItem(VIDEO_STORAGE_KEY, JSON.stringify(items.slice(0, MAX_VIDEO_ITEMS)))
+  } catch {
+    // Videos can be large; keeping the editor alive is more important than persistence.
+  }
+}
+
+export function addStudioVideo(input: {
+  name: string
+  dataUrl: string
+  mimeType: string
+  duration?: number
+}): StudioVideo {
+  const video: StudioVideo = {
+    id: crypto.randomUUID(),
+    name: input.name,
+    dataUrl: input.dataUrl,
+    mimeType: input.mimeType,
+    duration: input.duration ?? 0,
+    createdAt: Date.now()
+  }
+
+  const next = [video, ...loadStudioVideos()].slice(0, MAX_VIDEO_ITEMS)
+  saveStudioVideos(next)
+  return video
+}
+
+export function removeStudioVideo(id: string): void {
+  saveStudioVideos(loadStudioVideos().filter((item) => item.id !== id))
 }
 
 export async function readImageMeta(dataUrl: string): Promise<{ width: number; height: number }> {

@@ -148,6 +148,8 @@ export type TranslationKey =
   | 'whatsappAction'
   | 'undoAction'
   | 'redoAction'
+  | 'clearAllAction'
+  | 'clearAllDone'
   | 'cancelAction'
   | 'moveToolbar'
   | 'bubbleSpeech'
@@ -367,7 +369,7 @@ const translations: Record<ResolvedLanguage, Record<TranslationKey, string>> = {
     whatsappOpening: 'Copiando e abrindo WhatsApp Web...',
     whatsappReady: 'Imagem copiada. Cole no WhatsApp Web com Ctrl+V.',
     whatsappFailed: 'Falha ao compartilhar.',
-    helpHint: 'Esc cancela · Enter copia',
+    helpHint: 'Esc cancela · Enter confirma ferramentas · Alt+Delete limpa',
     toolSelect: 'Ajustar seleção',
     toolMove: 'Mover último elemento',
     toolPen: 'Caneta',
@@ -392,6 +394,8 @@ const translations: Record<ResolvedLanguage, Record<TranslationKey, string>> = {
     whatsappAction: 'WhatsApp Web',
     undoAction: 'Desfazer',
     redoAction: 'Refazer',
+    clearAllAction: 'Limpar tudo',
+    clearAllDone: 'Anotações removidas. A seleção foi mantida.',
     cancelAction: 'Cancelar',
     moveToolbar: 'Mover barra',
     bubbleSpeech: 'Balão fala',
@@ -432,7 +436,7 @@ const translations: Record<ResolvedLanguage, Record<TranslationKey, string>> = {
     shortcutLine: 'Linha',
     shortcutStar: 'Estrela',
     shortcutCancel: 'Cancelar captura',
-    settingsArrowHint: 'Atalhos e vídeo aqui',
+    settingsArrowHint: 'Atalhos',
     shortcutFullscreen: 'Capturar tela inteira',
     shortcutStudio: 'Abrir estúdio',
     shortcutRecordRegion: 'Gravar região',
@@ -612,7 +616,7 @@ const translations: Record<ResolvedLanguage, Record<TranslationKey, string>> = {
     whatsappOpening: 'Copying and opening WhatsApp Web...',
     whatsappReady: 'Image copied. Paste in WhatsApp Web with Ctrl+V.',
     whatsappFailed: 'Failed to share.',
-    helpHint: 'Esc cancel · Enter copy',
+    helpHint: 'Esc cancel · Enter confirms tools · Alt+Delete clears',
     toolSelect: 'Adjust selection',
     toolMove: 'Move last element',
     toolPen: 'Pen',
@@ -637,6 +641,8 @@ const translations: Record<ResolvedLanguage, Record<TranslationKey, string>> = {
     whatsappAction: 'WhatsApp Web',
     undoAction: 'Undo',
     redoAction: 'Redo',
+    clearAllAction: 'Clear all',
+    clearAllDone: 'Annotations cleared. Selection kept.',
     cancelAction: 'Cancel',
     moveToolbar: 'Move toolbar',
     bubbleSpeech: 'Speech bubble',
@@ -677,7 +683,7 @@ const translations: Record<ResolvedLanguage, Record<TranslationKey, string>> = {
     shortcutLine: 'Line',
     shortcutStar: 'Star',
     shortcutCancel: 'Cancel capture',
-    settingsArrowHint: 'Shortcuts & video here',
+    settingsArrowHint: 'Shortcuts',
     shortcutFullscreen: 'Capture full screen',
     shortcutStudio: 'Open studio',
     shortcutRecordRegion: 'Record region',
@@ -857,7 +863,7 @@ const translations: Record<ResolvedLanguage, Record<TranslationKey, string>> = {
     whatsappOpening: 'Copiando y abriendo WhatsApp Web...',
     whatsappReady: 'Imagen copiada. Pegue en WhatsApp Web con Ctrl+V.',
     whatsappFailed: 'Error al compartir.',
-    helpHint: 'Esc cancelar · Enter copiar',
+    helpHint: 'Esc cancelar · Enter confirma herramientas · Alt+Delete limpia',
     toolSelect: 'Ajustar selección',
     toolMove: 'Mover último elemento',
     toolPen: 'Lápiz',
@@ -882,6 +888,8 @@ const translations: Record<ResolvedLanguage, Record<TranslationKey, string>> = {
     whatsappAction: 'WhatsApp Web',
     undoAction: 'Deshacer',
     redoAction: 'Rehacer',
+    clearAllAction: 'Limpiar todo',
+    clearAllDone: 'Anotaciones eliminadas. La selección se mantuvo.',
     cancelAction: 'Cancelar',
     moveToolbar: 'Mover barra',
     bubbleSpeech: 'Globo de diálogo',
@@ -922,7 +930,7 @@ const translations: Record<ResolvedLanguage, Record<TranslationKey, string>> = {
     shortcutLine: 'Línea',
     shortcutStar: 'Estrella',
     shortcutCancel: 'Cancelar captura',
-    settingsArrowHint: 'Atajos y vídeo aquí',
+    settingsArrowHint: 'Atajos',
     shortcutFullscreen: 'Capturar pantalla completa',
     shortcutStudio: 'Abrir estudio',
     shortcutRecordRegion: 'Grabar región',
