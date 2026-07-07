@@ -1,6 +1,6 @@
 {
   "name": "gcpshot",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "GCPShot - captura de tela premium da Gestão Cultural Pro.",
   "main": "out/main/index.js",
   "author": "Gestão Cultural Pro",

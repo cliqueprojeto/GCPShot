@@ -18,6 +18,8 @@ import { extname, join, basename } from 'node:path'
 import type { AppSettings, CaptureExportPayload, CaptureMode, CaptureRect, CaptureResult, RecordMode } from '../shared/capture'
 import { defaultAppSettings } from '../shared/capture'
 
+type MainView = 'home' | 'studio'
+
 let mainWindow: BrowserWindow | null = null
 let captureWindow: BrowserWindow | null = null
 let captureWindows: BrowserWindow[] = []
@@ -145,7 +147,8 @@ function getAppIcon(): Electron.NativeImage {
 function loadRenderer(
   window: BrowserWindow,
   overlay: 'capture' | 'record' | false = false,
-  mode: CaptureMode = 'region'
+  mode: CaptureMode = 'region',
+  mainView: MainView = 'home'
 ): void {
   if (isDev && process.env.ELECTRON_RENDERER_URL) {
     const url = new URL(process.env.ELECTRON_RENDERER_URL)
@@ -153,6 +156,8 @@ function loadRenderer(
     if (overlay) {
       url.searchParams.set(overlay === 'record' ? 'record' : 'capture', '1')
       url.searchParams.set('mode', mode)
+    } else if (mainView === 'studio') {
+      url.searchParams.set('studio', '1')
     }
 
     window.loadURL(url.toString())
@@ -160,14 +165,21 @@ function loadRenderer(
   }
 
   window.loadFile(join(__dirname, '../renderer/index.html'), {
-    query: overlay ? { [overlay === 'record' ? 'record' : 'capture']: '1', mode } : undefined
+    query: overlay
+      ? { [overlay === 'record' ? 'record' : 'capture']: '1', mode }
+      : mainView === 'studio'
+        ? { studio: '1' }
+        : undefined
   })
 }
 
-function createMainWindow(): void {
+function createMainWindow(mainView: MainView = 'home'): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show()
     mainWindow.focus()
+    if (mainView === 'studio') {
+      mainWindow.webContents.send('studio:open')
+    }
     return
   }
 
@@ -188,7 +200,7 @@ function createMainWindow(): void {
   })
 
   mainWindow.setMenu(null)
-  loadRenderer(mainWindow)
+  loadRenderer(mainWindow, false, 'region', mainView)
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://www.gestaoculturalpro.com.br')) {
       void shell.openExternal(url)
@@ -224,6 +236,25 @@ function showMainWindow(): void {
 
   mainWindow.show()
   mainWindow.focus()
+}
+
+function openStudioWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createMainWindow('studio')
+    return
+  }
+
+  mainWindow.show()
+  mainWindow.focus()
+
+  if (mainWindow.webContents.isLoading()) {
+    mainWindow.webContents.once('did-finish-load', () => {
+      mainWindow?.webContents.send('studio:open')
+    })
+    return
+  }
+
+  mainWindow.webContents.send('studio:open')
 }
 
 function openSettingsWindow(): void {
@@ -262,7 +293,7 @@ function createTray(): void {
     Menu.buildFromTemplate([
       { label: 'Capturar região', click: () => void beginCapture('region') },
       { label: 'Capturar tela inteira', click: () => void beginCapture('fullscreen') },
-      { label: 'Abrir GCPShot', click: showMainWindow },
+      { label: 'Abrir o Estúdio', click: openStudioWindow },
       { type: 'separator' },
       {
         label: 'Iniciar com o Windows',
@@ -282,7 +313,7 @@ function createTray(): void {
       }
     ])
   )
-  tray.on('double-click', showMainWindow)
+  tray.on('double-click', openStudioWindow)
 }
 
 function cropThumbnailToWorkArea(thumbnail: Electron.NativeImage, display: Electron.Display): Electron.NativeImage {
@@ -468,10 +499,6 @@ function closeCaptureWindow(): void {
 
   captureWindows = []
   captureWindow = null
-
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.show()
-  }
 }
 
 function registerIpc(): void {
@@ -641,6 +668,9 @@ function registerIpc(): void {
   ipcMain.handle('window:open-settings', () => {
     openSettingsWindow()
   })
+  ipcMain.handle('window:open-studio', () => {
+    openStudioWindow()
+  })
   ipcMain.handle('studio:pick-images', async (): Promise<{ ok: boolean; files: Array<{ name: string; dataUrl: string; width: number; height: number }>; error?: string }> => {
     const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow ?? undefined, {
       title: 'Importar imagens para o estúdio',
@@ -754,7 +784,7 @@ function registerShortcuts(): void {
   globalShortcut.register(settings.fullscreenShortcut, startFullscreen)
 
   if (settings.printScreenShortcut) {
-    globalShortcut.register('PrintScreen', start)
+    globalShortcut.register('PrintScreen', startRegion)
   }
 }
 

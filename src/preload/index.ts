@@ -24,6 +24,7 @@ const api = {
   resetSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:reset'),
   showMainWindow: (): Promise<void> => ipcRenderer.invoke('window:show-main'),
   openSettingsWindow: (): Promise<void> => ipcRenderer.invoke('window:open-settings'),
+  openStudioWindow: (): Promise<void> => ipcRenderer.invoke('window:open-studio'),
   onOpenSettings: (callback: () => void): (() => void) => {
     const listener = (): void => {
       callback()
@@ -31,6 +32,14 @@ const api = {
 
     ipcRenderer.on('settings:open', listener)
     return () => ipcRenderer.removeListener('settings:open', listener)
+  },
+  onOpenStudio: (callback: () => void): (() => void) => {
+    const listener = (): void => {
+      callback()
+    }
+
+    ipcRenderer.on('studio:open', listener)
+    return () => ipcRenderer.removeListener('studio:open', listener)
   },
   onCaptureImage: (callback: (payload: CaptureImagePayload) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: CaptureImagePayload): void => {

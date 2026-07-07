@@ -47,6 +47,7 @@ type SelectionAdjustState = {
 }
 
 const isCaptureMode = new URLSearchParams(window.location.search).get('capture') === '1'
+const isStudioMode = new URLSearchParams(window.location.search).get('studio') === '1'
 const initialCaptureMode = (new URLSearchParams(window.location.search).get('mode') ?? 'region') as CaptureMode
 const palettes = {
   GCP: ['#7b2ff7', '#d94cff', '#ffcf70', '#ffffff', '#2b0f43'],
@@ -219,7 +220,7 @@ function toolLabel(language: AppLanguage, tool: EditorTool): string {
 }
 
 function Landing(): JSX.Element {
-  const [view, setView] = useState<'home' | 'studio'>('home')
+  const [view, setView] = useState<'home' | 'studio'>(isStudioMode ? 'studio' : 'home')
   const [settings, setSettings] = useState<AppSettings>(defaultAppSettings)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('general')
@@ -238,6 +239,13 @@ function Landing(): JSX.Element {
 
   useEffect(() => {
     return window.gcpshot.onOpenSettings(() => setSettingsOpen(true))
+  }, [])
+
+  useEffect(() => {
+    return window.gcpshot.onOpenStudio(() => {
+      setSettingsOpen(false)
+      setView('studio')
+    })
   }, [])
 
   async function startCapture(mode: CaptureMode): Promise<void> {
@@ -2548,12 +2556,6 @@ function CaptureOverlay(): JSX.Element {
           </div>
         </div>
       )}
-
-      <div className="capture-help">
-        <strong>{t(language, 'appName')}</strong>
-        <span>{status}</span>
-        <small>{t(language, 'helpHint')}</small>
-      </div>
     </main>
   )
 }

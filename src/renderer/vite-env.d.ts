@@ -21,7 +21,9 @@ declare global {
       resetSettings: () => Promise<AppSettings>
       showMainWindow: () => Promise<void>
       openSettingsWindow: () => Promise<void>
+      openStudioWindow: () => Promise<void>
       onOpenSettings: (callback: () => void) => () => void
+      onOpenStudio: (callback: () => void) => () => void
       onCaptureImage: (callback: (payload: CaptureImagePayload) => void) => () => void
       pickStudioImages: () => Promise<StudioPickResult>
       exportStudioImage: (dataUrl: string) => Promise<CaptureResult>
