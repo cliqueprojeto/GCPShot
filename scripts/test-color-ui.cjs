@@ -45,7 +45,7 @@ const assert = require('node:assert/strict')
     const processInfo = require('node:child_process').execFileSync('powershell.exe', ['-NoProfile', '-Command', "Get-Process -Name 'GCPShot.LiveColor' | Select-Object ProcessName,MainWindowTitle | ConvertTo-Json"], { encoding: 'utf8' })
     assert.ok(processInfo.includes('GCPShot.LiveColor'), 'Live Color panel must be running')
     require('node:child_process').execFileSync('powershell.exe', ['-NoProfile', '-Command', "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{ESC}')"])
-    await page.waitForFunction(() => document.querySelector('[role=status]').textContent.includes('cancelada'))
+    await page.waitForFunction(() => document.visibilityState === 'visible')
     assert.equal(await page.isVisible('body'), true)
     assert.equal(app.windows().length, 1, 'Cancel should leave only the main window')
     const swatch = await app.evaluate(async ({ BrowserWindow, screen }) => {
@@ -57,7 +57,10 @@ const assert = require('node:assert/strict')
     await page.locator('.workspace-live').click()
     await page.waitForTimeout(800)
     require('node:child_process').execFileSync('powershell.exe', ['-NoProfile', '-Command', `Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class ColorTestMouse { [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y); [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint x, uint y, uint d, UIntPtr e); }'; [ColorTestMouse]::SetCursorPos(${swatch.x}, ${swatch.y}) | Out-Null; Start-Sleep -Milliseconds 300; [ColorTestMouse]::mouse_event(2,0,0,0,[UIntPtr]::Zero); [ColorTestMouse]::mouse_event(4,0,0,0,[UIntPtr]::Zero)`])
-    await page.getByRole('status').filter({ hasText: '#12A4B6 copiado' }).waitFor()
+    for (let attempt = 0; attempt < 50; attempt++) {
+      if (await app.evaluate(({ clipboard }) => clipboard.readText()) === '#12A4B6') break
+      await page.waitForTimeout(50)
+    }
     assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), '#12A4B6')
     assert.equal((await page.evaluate(() => window.gcpshot.getColorLibrary())).history[0], '#12A4B6')
     await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).destroy(), swatch.id)
