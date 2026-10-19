@@ -11,6 +11,7 @@ const assert = require('node:assert/strict')
       await page.getByRole('button', { name: 'Começar', exact: true }).click()
     }
     await page.getByRole('heading', { name: 'O que vamos criar hoje?' }).waitFor()
+    await require('./test-branding.cjs')(app, page)
     await page.screenshot({ path: 'release/workspace-home-0.6.0.png', fullPage: true })
     for (const name of ['Color Lab', 'Minhas Paletas', 'Estúdio', 'Captura']) {
       await page.getByRole('navigation', { name: 'Navegação principal' }).getByRole('button', { name, exact: true }).click()

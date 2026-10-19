@@ -283,7 +283,7 @@ function Landing(): JSX.Element {
           <section className="workspace-recents"><header className="workspace-section-heading"><h2>Capturas recentes</h2><button onClick={() => setView('studio')}>Ver no Estúdio</button></header>
             {recent.length ? <div className="workspace-recent-list">{recent.map((image) => <button key={image.id} onClick={() => setView('studio')}><img src={image.dataUrl} alt={image.name} /><span>{image.name}</span></button>)}</div> : <p className="workspace-empty">Suas próximas capturas aparecerão aqui.</p>}
           </section>
-          <details className="workspace-support"><summary>Apoie o GCPShot</summary><ContributionPanel language={language} /></details>
+          <section className="workspace-support" aria-labelledby="workspace-support-title"><h2 id="workspace-support-title">Apoie o GCPShot</h2><ContributionPanel language={language} /></section>
         </main>}
     </WorkspaceShell>
     {settingsOpen && <SettingsPanel settings={settings} language={language} settingsTab={settingsTab} recordingShortcut={recordingShortcut} onTabChange={setSettingsTab} onClose={() => setSettingsOpen(false)} onUpdateSetting={(patch) => void updateSetting(patch)} onReset={() => void resetSettings()} onRecordingShortcutChange={setRecordingShortcut} />}

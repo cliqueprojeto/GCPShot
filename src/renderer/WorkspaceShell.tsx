@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Scan, Images, Pipette, Palette, Crosshair, Settings2, ArrowUpRight } from 'lucide-react'
 import appIcon from '../../build/icon.png'
+import { DEVELOPER_CREDIT, GCP_SITE_URL, ORGANIZATION_NAME } from '../shared/branding'
 import './workspace.css'
 
 export type WorkspaceView = 'home' | 'studio' | 'colors' | 'palettes'
@@ -20,7 +21,7 @@ export function WorkspaceShell({ view, version, shortcut, onNavigate, onLiveColo
       <nav aria-label="Navegação principal">{views.map((item) => <button key={item.view} aria-label={item.label} title={item.label} aria-current={view === item.view ? 'page' : undefined} onClick={() => onNavigate(item.view)}><item.icon size={19} strokeWidth={1.7} /><span>{item.label}</span></button>)}</nav>
       <div className="workspace-divider" />
       <button className="workspace-live" aria-label="Live Color" title={`Live Color (${shortcut})`} onClick={onLiveColor}><Crosshair size={19} /><span>Live Color<kbd>{shortcut}</kbd></span></button>
-      <div className="workspace-sidebar-footer"><button onClick={onSettings}><Settings2 size={18} /><span>Configurações</span></button><a href="https://gestaoculturalpro.com.br/" target="_blank" rel="noreferrer">Gestão Cultural Pro<ArrowUpRight size={13} /></a><small>GCPShot {version}</small></div>
+      <div className="workspace-sidebar-footer"><button onClick={onSettings}><Settings2 size={18} /><span>Configurações</span></button><p className="workspace-developer">{DEVELOPER_CREDIT}</p><a href={GCP_SITE_URL} target="_blank" rel="noreferrer" title="Acessar o site Gestão Cultural Pro">{ORGANIZATION_NAME}<ArrowUpRight size={13} /></a><small>GCPShot {version}</small></div>
     </aside>
     <div className="workspace-content">{children}</div>
   </div>

@@ -1,13 +1,13 @@
 {
   "name": "gcpshot",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "GCPShot - captura de tela premium da Gestão Cultural Pro.",
   "main": "out/main/index.js",
   "author": "Gestão Cultural Pro",
   "homepage": "https://www.gestaoculturalpro.com.br",
   "private": true,
   "scripts": {
-    "test": "node scripts/test-colors.cjs",
+    "test": "node scripts/test-colors.cjs && node scripts/test-branding-unit.cjs",
     "build:brand": "node scripts/build-brand-assets.cjs",
     "dev": "electron-vite dev",
     "typecheck": "tsc --noEmit",

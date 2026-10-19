@@ -23,6 +23,7 @@ import { defaultAppSettings } from '../shared/capture'
 import { normalizeHex, parseLibrary, type ColorResult } from '../shared/colors'
 import { getColorLibrary, loadColorLibrary, saveColorLibrary } from './colorLibrary'
 import { getStoredCaptures, removeStoredCapture, storeCapture } from './captureStore'
+import { DEVELOPER_CREDIT, GCP_SITE_URL, ORGANIZATION_NAME, isProjectSiteUrl } from '../shared/branding'
 
 type MainView = 'home' | 'studio' | 'colors' | 'palettes'
 
@@ -226,14 +227,14 @@ function createMainWindow(mainView: MainView = 'home'): void {
   if (showWelcome && mainView === 'home') void mainWindow.loadFile(join(__dirname, '../../build/welcome.html'))
   else loadRenderer(mainWindow, false, 'region', mainView)
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https://www.gestaoculturalpro.com.br')) {
+    if (isProjectSiteUrl(url)) {
       void shell.openExternal(url)
     }
 
     return { action: 'deny' }
   })
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    if (url.startsWith('https://www.gestaoculturalpro.com.br')) {
+    if (isProjectSiteUrl(url)) {
       event.preventDefault()
       void shell.openExternal(url)
     }
@@ -379,6 +380,21 @@ function showColorToast(hex: string, destination: 'colors' | 'studio' = 'colors'
   void window.loadFile(join(__dirname, '../../build/color-toast.html'), { query: { hex, destination } })
 }
 
+async function showAboutDialog(): Promise<void> {
+  const result = await dialog.showMessageBox({
+    type: 'info',
+    title: 'Sobre o GCPShot',
+    message: 'GCPShot',
+    detail: `${DEVELOPER_CREDIT} | ${ORGANIZATION_NAME}\n\nVersão ${app.getVersion()}\n${GCP_SITE_URL}`,
+    icon: getAppIcon(),
+    buttons: ['Acessar site', 'Fechar'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true
+  })
+  if (result.response === 0) await shell.openExternal(GCP_SITE_URL)
+}
+
 function createTray(): void {
   if (tray) {
     tray.destroy()
@@ -406,6 +422,7 @@ function createTray(): void {
       { label: 'Live Color', icon: trayMenuIcon('live'), accelerator: settings.liveColorShortcut, click: () => void beginLiveColor().then((result) => { if (result.error) notify('Live Color', result.error) }) },
       { type: 'separator' },
       { label: 'Configurações', icon: trayMenuIcon('settings'), click: openSettingsWindow },
+      { label: 'Sobre', icon: trayMenuIcon('about'), click: () => void showAboutDialog().catch((error) => console.error('GCPShot: não foi possível abrir Sobre.', error)) },
       {
         label: process.platform === 'win32' ? 'Iniciar com o Windows' : 'Iniciar com o sistema',
         icon: trayMenuIcon('startup'),

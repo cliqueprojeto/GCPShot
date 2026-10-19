@@ -24,6 +24,7 @@ const { resolve } = require('node:path')
     assert.equal((await page.evaluate(() => window.gcpshot.getColorLibrary())).palettes[0].colors.length, 5)
     await require('./test-capture-flow.cjs')(app, page)
     await require('./test-photo-editor.cjs')(app, page)
+    await require('./test-branding.cjs')(app, page)
     assert.deepEqual(errors, [])
     console.log(`Packaged ${process.platform}/${process.arch} app: launch, Color Lab, clipboard and palette persistence passed.`)
   } finally { await app.evaluate(({ app }) => app.quit()).catch(() => {}); await app.close().catch(() => {}) }

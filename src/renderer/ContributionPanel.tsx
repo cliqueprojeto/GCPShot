@@ -4,7 +4,7 @@ import { t } from '../shared/i18n'
 import qrPix from './assets/qr-pix.png'
 import qrStripe from './assets/qr-stripe.png'
 
-export const GCP_SITE_URL = 'https://gestaoculturalpro.com.br/'
+export { GCP_SITE_URL } from '../shared/branding'
 export const PIX_KEY =
   '00020126850014br.gov.bcb.pix0136e474b71b-7491-4eac-992f-632652e5a4eb0223DEV GESTAO CULTURAL PRO5204000053039865802BR5915BRUNO ALBERTINI6006BRASIL62200516ChromeExtensions63042B27'
 export const STRIPE_DONATE_URL = 'https://donate.stripe.com/fZu4gzeBSfhbd7451F6Ri00'
