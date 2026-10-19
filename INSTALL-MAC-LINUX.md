@@ -12,7 +12,7 @@ Na primeira captura ou no Live Color, autorize a gravacao de tela para GCPShot.
 Se solicitado, feche e abra novamente o aplicativo apos conceder a permissao.
 Camera e microfone sao opcionais e so sao utilizados quando habilitados.
 
-## Debian, Ubuntu e Linux Mint (PC 64 bits)
+## Debian 12+, Ubuntu 22.04+ e Linux Mint 21+ (PC 64 bits)
 
 Abra o arquivo .deb pelo instalador de aplicativos da distribuicao.
 Tambem pode instalar na pasta do arquivo com:
