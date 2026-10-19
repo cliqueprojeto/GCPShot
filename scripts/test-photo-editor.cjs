@@ -1,10 +1,14 @@
 const assert = require('node:assert/strict')
 const sharp = require('sharp')
+const { join } = require('node:path')
+const { readFileSync } = require('node:fs')
 
 module.exports = async function testPhotoEditor(app, page) {
   const navigation = page.getByRole('navigation', { name: 'Navegação principal' })
   await page.locator('.workspace-sidebar').getByRole('button', { name: 'Configurações', exact: true }).click()
   await page.getByRole('dialog').waitFor()
+  await page.getByRole('dialog').getByRole('tab').nth(2).click()
+  await page.getByRole('dialog').locator('select').nth(1).selectOption('pt-BR')
   for (const name of ['Geral', 'Teclas de atalho', 'Formatos']) {
     await page.getByRole('tab', { name, exact: true }).click()
     const dialog = page.getByRole('dialog')
@@ -39,6 +43,17 @@ module.exports = async function testPhotoEditor(app, page) {
   pixels = await readPixels()
   assert.equal(pixels.data[3], 0)
   assert.equal(pixels.data[(120 * 320 + 160) * 4 + 3], 255)
+  const exportedPath = join(await app.evaluate(({ app }) => app.getPath('userData')), 'photo-editor-test.png')
+  await app.evaluate(({ dialog }, path) => {
+    const original = dialog.showSaveDialog
+    dialog.showSaveDialog = async () => { dialog.showSaveDialog = original; return { canceled: false, filePath: path } }
+  }, exportedPath)
+  await page.getByRole('button', { name: 'Exportar PNG', exact: true }).click()
+  await page.waitForTimeout(400)
+  const exportedPixels = await sharp(readFileSync(exportedPath)).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+  assert.equal(exportedPixels.info.width, 320)
+  assert.equal(exportedPixels.info.height, 240)
+  assert.equal(exportedPixels.data[3], 0)
   await editor.getByRole('button', { name: 'Desfazer edição', exact: true }).click()
   pixels = await readPixels(); assert.equal(pixels.data[3], 255)
   await editor.getByRole('button', { name: 'Refazer edição', exact: true }).click()
@@ -77,6 +92,8 @@ module.exports = async function testPhotoEditor(app, page) {
   assert.deepEqual([...pixels.data.subarray((20 * 320 + 50) * 4, (20 * 320 + 50) * 4 + 3)], [95, 66, 235])
   await editor.getByRole('button', { name: 'Salvar cópia na biblioteca', exact: true }).click()
   await page.locator('.studio-thumb[title="Editor fixture (editado)"]').waitFor()
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('gcpshot-studio-library')).find((item) => item.name === 'Editor fixture (editado)'))
+  assert.equal(saved.width, 320); assert.equal(saved.height, 240)
   await page.waitForTimeout(300)
   await page.locator('.workspace-content').evaluate((node) => node.scrollTo(0, 0))
   await page.screenshot({ path: 'release/photo-editor-0.6.0.png' })

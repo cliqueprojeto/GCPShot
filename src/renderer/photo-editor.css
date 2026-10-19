@@ -37,6 +37,13 @@
 .photo-filter-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .photo-filter-grid button { padding: 5px; flex-direction: column; min-width: 0; }
 .photo-filter-grid img { width: 100%; height: 62px; object-fit: cover; border-radius: 3px; }
+.photo-filter-grid .filter-pb { filter: grayscale(1); }
+.photo-filter-grid .filter-sepia { filter: sepia(.82) contrast(1.08) saturate(.92); }
+.photo-filter-grid .filter-noir { filter: grayscale(1) contrast(1.32) brightness(.88); }
+.photo-filter-grid .filter-retro { filter: sepia(.38) saturate(1.38) contrast(1.12); }
+.photo-filter-grid .filter-chrome { filter: saturate(1.58) contrast(1.24) brightness(1.04); }
+.photo-filter-grid .filter-film { filter: sepia(.18) contrast(1.18) saturate(.86); }
+.photo-filter-grid .filter-warm { filter: sepia(.22) saturate(1.18) brightness(1.06); }
 .photo-wide { width: 100%; }
 .photo-save-actions { display: grid; gap: 8px; margin-top: 24px; padding-top: 18px; border-top: 1px solid #343543; }
 .photo-note { font-size: 11px; line-height: 1.6; color: #a7a2bb; margin: 0; }

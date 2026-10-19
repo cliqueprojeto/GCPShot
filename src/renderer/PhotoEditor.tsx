@@ -165,6 +165,7 @@ export const PhotoEditor = forwardRef<PhotoEditorHandle, { source: string; name:
     })
   }
   const scale = zoom ?? fit
+  const rotation = ((document.values.rotation + 180) % 360 + 360) % 360 - 180
   const changeTool = (next: Tool) => { setTool(next); setSelectSeed(false); if (next === 'draw') setBrush('pen'); if (next === 'retouch') setBrush('clone') }
   return <section className="photo-editor" aria-label="Editor de imagem">
     <div className="photo-toolbar" role="toolbar" aria-label="Ferramentas de imagem">
@@ -199,9 +200,16 @@ export const PhotoEditor = forwardRef<PhotoEditorHandle, { source: string; name:
       <h3>{tools.find((item) => item.id === tool)?.label}</h3>
       <fieldset disabled={busy}>
       {tool === 'crop' && <>
-        <label>Proporção<select aria-label="Proporção do recorte" value={aspect || 0} onChange={(event) => { setAspect(Number(event.target.value) || undefined); setCrop(undefined) }}><option value={0}>Livre</option><option value={1}>1:1</option><option value={4 / 3}>4:3</option><option value={3 / 2}>3:2</option><option value={16 / 9}>16:9</option><option value={9 / 16}>9:16</option></select></label>
+        <label>Proporção<select aria-label="Proporção do recorte" value={aspect || 0} onChange={(event) => {
+          const ratio = Number(event.target.value) || undefined
+          setAspect(ratio)
+          if (!ratio) return
+          const height = Math.min(90, 90 * dimensions.width / (ratio * dimensions.height))
+          const width = height * ratio * dimensions.height / dimensions.width
+          setCrop({ unit: '%', x: (100 - width) / 2, y: (100 - height) / 2, width, height })
+        }}><option value={0}>Livre</option><option value={1}>1:1</option><option value={4 / 3}>4:3</option><option value={3 / 2}>3:2</option><option value={16 / 9}>16:9</option><option value={9 / 16}>9:16</option></select></label>
         <div className="photo-button-row"><button title="Girar à esquerda" aria-label="Girar à esquerda" onClick={() => adjust({ rotation: document.values.rotation - 90 })}><RotateCcw size={19} /></button><button title="Girar à direita" aria-label="Girar à direita" onClick={() => adjust({ rotation: document.values.rotation + 90 })}><RotateCw size={19} /></button><button title="Espelhar horizontalmente" aria-label="Espelhar horizontalmente" onClick={() => adjust({ flipHorizontal: !document.values.flipHorizontal })}><FlipHorizontal2 size={19} /></button><button title="Espelhar verticalmente" aria-label="Espelhar verticalmente" onClick={() => adjust({ flipVertical: !document.values.flipVertical })}><FlipVertical2 size={19} /></button></div>
-        <label>Endireitar <output>{document.values.rotation}°</output><input aria-label="Endireitar" type="range" min={-180} max={180} step={.5} value={document.values.rotation % 360} onChange={(event) => adjust({ rotation: Number(event.target.value) }, 'rotation')} /></label>
+        <label>Endireitar <output>{rotation}°</output><input aria-label="Endireitar" type="range" min={-180} max={180} step={.5} value={rotation} onChange={(event) => adjust({ rotation: Number(event.target.value) }, 'rotation')} /></label>
         <div className="photo-button-row"><button disabled={!crop} onClick={applyCrop}><Check size={17} />Aplicar recorte</button><button title="Cancelar recorte" aria-label="Cancelar recorte" onClick={() => setCrop(undefined)}><X size={17} /></button></div>
       </>}
       {tool === 'light' && <>{sliders.map(([key, label]) => <label key={key}>{label}<output>{document.values[key]}</output><input aria-label={label} type="range" min={key === 'vignette' ? 0 : -100} max={100} value={document.values[key]} onChange={(event) => adjust({ [key]: Number(event.target.value) }, key)} /></label>)}</>}

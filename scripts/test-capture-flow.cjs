@@ -14,7 +14,7 @@ module.exports = async function testCapture(app, page) {
   await app.evaluate(({ desktopCapturer, nativeImage }, sources) => {
     desktopCapturer.getSources = async () => sources.map((source) => ({ ...source, name: 'Test screen', thumbnail: nativeImage.createFromDataURL(source.dataUrl) })).reverse()
   }, sources)
-  await page.evaluate(() => window.gcpshot.updateSettings({ keepSelectionAfterAction: true, autoCopyAfterCapture: false }))
+  await page.evaluate(() => window.gcpshot.updateSettings({ language: 'pt-BR', keepSelectionAfterAction: true, autoCopyAfterCapture: false }))
   for (const autoCopy of [true, false]) {
     const created = app.waitForEvent('window', { timeout: 15000 })
     await page.evaluate((quick) => window.gcpshot.beginCapture('region', quick), autoCopy)
@@ -26,16 +26,15 @@ module.exports = async function testCapture(app, page) {
     const display = displays[autoCopy ? 0 : displays.length - 1]
     const x = display.bounds.x - Math.min(...displays.map((d) => d.bounds.x)) + 100
     const y = display.bounds.y - Math.min(...displays.map((d) => d.bounds.y)) + (autoCopy ? display.bounds.height - 30 : 100)
-    await overlay.mouse.move(x, y)
-    await overlay.mouse.down()
-    await overlay.mouse.move(x + 160, y + (autoCopy ? 20 : 120), { steps: 5 })
+    const surface = overlay.locator('.capture-overlay')
+    await surface.dispatchEvent('mousedown', { clientX: x, clientY: y, button: 0, buttons: 1 })
+    await surface.dispatchEvent('mousemove', { clientX: x + 160, clientY: y + (autoCopy ? 20 : 120), buttons: 1 })
     const closed = overlay.waitForEvent('close')
-    await overlay.mouse.up().catch(() => {})
+    await surface.dispatchEvent('mouseup', { clientX: x + 160, clientY: y + (autoCopy ? 20 : 120), button: 0 }).catch(() => {})
     if (!autoCopy) {
-      await overlay.mouse.move(x + 40, y + 40)
-      await overlay.mouse.down()
-      await overlay.mouse.move(x + 100, y + 80, { steps: 5 })
-      await overlay.mouse.up()
+      await surface.dispatchEvent('mousedown', { clientX: x + 40, clientY: y + 40, button: 0, buttons: 1 })
+      await surface.dispatchEvent('mousemove', { clientX: x + 100, clientY: y + 80, buttons: 1 })
+      await surface.dispatchEvent('mouseup', { clientX: x + 100, clientY: y + 80, button: 0 })
       await overlay.keyboard.press('Control+c').catch(() => {})
     }
     await closed
