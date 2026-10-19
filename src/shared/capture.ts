@@ -15,6 +15,10 @@ export type CaptureSegment = {
   width: number
   height: number
   displayId: number
+  label?: string
+  scaleFactor?: number
+  pixelWidth?: number
+  pixelHeight?: number
   isPrimary: boolean
   screenSourceId: string
 }

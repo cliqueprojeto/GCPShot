@@ -25,9 +25,9 @@ async function bitmap(input, output) {
   const icon = (await fs.readFile('build/icon.png')).toString('base64')
   const React = require('react')
   const { renderToStaticMarkup } = require('react-dom/server')
-  const { Scan, Monitor, Images, Pipette, Palette, Crosshair, Power, LogOut } = require('lucide-react')
+  const { Scan, Monitor, Images, Pipette, Palette, Crosshair, Power, LogOut, Settings2 } = require('lucide-react')
   await fs.mkdir('build/tray', { recursive: true })
-  for (const [name, component] of Object.entries({ region: Scan, fullscreen: Monitor, studio: Images, colors: Pipette, palettes: Palette, live: Crosshair, startup: Power, quit: LogOut })) {
+  for (const [name, component] of Object.entries({ region: Scan, fullscreen: Monitor, studio: Images, colors: Pipette, palettes: Palette, live: Crosshair, startup: Power, quit: LogOut, settings: Settings2 })) {
     for (const [variant, stroke] of [['light', '#ECECF5'], ['dark', '#343047']]) {
       const markup = renderToStaticMarkup(React.createElement(component, { size: 20, color: stroke, strokeWidth: 1.8 }))
       await sharp(Buffer.from(markup)).png().toFile(`build/tray/${name}-${variant}.png`)

@@ -4,6 +4,8 @@ import { defaultAppSettings } from '../shared/capture'
 import type { AppLanguage, TranslationKey } from '../shared/i18n'
 import { t } from '../shared/i18n'
 import { ActionIcon, ToolIcon, type EditorTool } from './icons'
+import { Settings2, Keyboard, FileImage, X } from 'lucide-react'
+import './settings.css'
 
 export type SettingsTab = 'general' | 'shortcuts' | 'formats' | 'video' | 'audio'
 
@@ -130,23 +132,31 @@ export function SettingsPanel({
   const tabs = useMemo(
     () =>
       [
-        { id: 'general' as const, label: t(language, 'tabGeneral') },
-        { id: 'shortcuts' as const, label: t(language, 'tabShortcuts') },
-        { id: 'formats' as const, label: t(language, 'tabFormats') }
+        { id: 'general' as const, label: t(language, 'tabGeneral'), icon: Settings2 },
+        { id: 'shortcuts' as const, label: t(language, 'tabShortcuts'), icon: Keyboard },
+        { id: 'formats' as const, label: t(language, 'tabFormats'), icon: FileImage }
       ],
     [language]
   )
 
   return (
-    <section className={overlay ? 'settings-backdrop capture-settings-backdrop' : 'settings-backdrop'} role="dialog" aria-modal="true">
+    <section className={overlay ? 'settings-backdrop capture-settings-backdrop' : 'settings-backdrop'} role="dialog" aria-modal="true" aria-labelledby="settings-title" onKeyDown={(event) => {
+      if (event.key === 'Escape' && !recordingShortcut) { event.preventDefault(); event.stopPropagation(); onClose() }
+      if (event.key === 'Tab') {
+        const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled)')).filter((node) => node.offsetParent !== null)
+        const first = controls[0], last = controls.at(-1)
+        if (event.shiftKey && event.target === first) { event.preventDefault(); last?.focus() }
+        if (!event.shiftKey && event.target === last) { event.preventDefault(); first?.focus() }
+      }
+    }}>
       <div className="settings-window">
         <header>
           <div>
             <p className="eyebrow">{t(language, 'preferences')}</p>
-            <h3>{t(language, 'settingsTitle')}</h3>
+            <h3 id="settings-title">{t(language, 'settingsTitle')}</h3>
           </div>
-          <button className="icon-button" onClick={onClose}>
-            ×
+          <button className="icon-button" title="Fechar" aria-label="Fechar configurações" onClick={onClose}>
+            <X size={19} />
           </button>
         </header>
 
@@ -159,11 +169,11 @@ export function SettingsPanel({
               aria-selected={settingsTab === tab.id}
               onClick={() => onTabChange(tab.id)}
             >
-              {tab.label}
+              <tab.icon size={18} />{tab.label}
             </button>
           ))}
         </div>
-
+        <div className="settings-content" role="tabpanel">
         {settingsTab === 'general' && (
           <div className="settings-list">
             <label>
@@ -352,6 +362,7 @@ export function SettingsPanel({
             </button>
           </>
         )}
+        </div>
       </div>
     </section>
   )

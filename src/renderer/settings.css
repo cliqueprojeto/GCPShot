@@ -1,0 +1,32 @@
+.settings-backdrop.settings-backdrop { background: #090a10bb; backdrop-filter: blur(8px); padding: 24px; }
+.settings-backdrop .settings-window { width: min(960px, 100%); max-height: min(820px, calc(100dvh - 48px)); padding: 0; border: 1px solid #343441; border-radius: 8px; background: #11121b; box-shadow: 0 24px 80px #0008; display: grid; grid-template-columns: 190px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); overflow: hidden; color: #f2f1fa; }
+.settings-backdrop .settings-window > header { grid-column: 1 / -1; margin: 0; padding: 24px; border-bottom: 1px solid #2c2d3b; background: #161722; align-items: center; }
+.settings-backdrop .settings-window h3 { font-size: 23px; margin: 6px 0 0; }
+.settings-backdrop .settings-window .eyebrow { color: #a5a4bd; letter-spacing: 1.5px; font-size: 10px; }
+.settings-backdrop .settings-tabs { display: flex; flex-direction: column; align-items: stretch; gap: 6px; margin: 0; padding: 18px 12px; border: 0; border-right: 1px solid #2c2d3b; border-radius: 0; background: #161722; }
+.settings-backdrop .settings-tabs button { display: flex; align-items: center; gap: 10px; text-align: left; border-radius: 6px; padding: 13px 12px; color: #bdbcd0; background: transparent; font-weight: 500; }
+.settings-backdrop .settings-tabs button.active { background: #5f42eb; color: white; box-shadow: none; }
+.settings-backdrop .settings-content { padding: 24px; overflow-y: auto; scrollbar-color: #4b456b #161722; min-width: 0; }
+.settings-backdrop .settings-content .settings-grid { gap: 14px; }
+.settings-backdrop .settings-content .settings-grid > label,
+.settings-backdrop .settings-content .settings-list > label,
+.settings-backdrop .settings-content .shortcut-row { padding: 16px; background: #1a1b27; border: 1px solid #30313f; border-radius: 6px; box-shadow: none; }
+.settings-backdrop .settings-content input:not([type=checkbox]):not([type=range]):not([type=color]),
+.settings-backdrop .settings-content select { background: #101119; color: #f1f0fa; border: 1px solid #3a3b4c; border-radius: 5px; min-height: 38px; }
+.settings-backdrop .settings-content input[type=checkbox], .settings-backdrop .settings-content input[type=range] { accent-color: #5f42eb; }
+.settings-backdrop .settings-content button:not(.icon-button) { border-radius: 5px; box-shadow: none; }
+.settings-backdrop .settings-content .shortcut-recorder button { background: #5f42eb; font-weight: 600; }
+.settings-backdrop .settings-content .shortcut-row-icon { background: #2b2841; border-radius: 4px; }
+.settings-backdrop .settings-content .settings-hint { color: #a7a3bb; background: #1a1b27; border-color: #30313f; border-radius: 5px; }
+.settings-backdrop .settings-content label > span { color: #c8c7d9; }
+.settings-backdrop .settings-content .reset-button { margin-top: 20px; background: #242532; border: 1px solid #3a3b4c; color: #efedf9; }
+.settings-backdrop .settings-window .icon-button { display: grid; place-items: center; border-radius: 5px; background: #242532; border: 1px solid #3a3b4c; }
+@media (max-width: 680px) {
+  .settings-backdrop.settings-backdrop { padding: 10px; }
+  .settings-backdrop .settings-window { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); max-height: calc(100dvh - 20px); }
+  .settings-backdrop .settings-tabs { flex-direction: row; padding: 10px; border-right: 0; border-bottom: 1px solid #2c2d3b; }
+  .settings-backdrop .settings-tabs button { flex: 1; padding: 10px 8px; justify-content: center; gap: 6px; }
+  .settings-backdrop .settings-content { padding: 16px; }
+  .settings-backdrop .settings-content .settings-grid { grid-template-columns: minmax(0, 1fr); }
+  .settings-backdrop .shortcut-grid { grid-template-columns: minmax(0, 1fr); }
+}

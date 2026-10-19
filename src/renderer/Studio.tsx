@@ -3,15 +3,14 @@ import type { AppSettings } from '../shared/capture'
 import type { AppLanguage, TranslationKey } from '../shared/i18n'
 import { t } from '../shared/i18n'
 import { StudioErrorBoundary } from './StudioErrorBoundary'
+import { PhotoEditor, type PhotoEditorHandle } from './PhotoEditor'
 import {
-  applyImageAdjustments,
   collageLayouts,
   createThumbnailDataUrl,
   renderLayerComposition,
   renderCollage,
   type CollageLayoutId,
   type CollageSlotPosition,
-  type ImageFilterPreset,
   type ImageLayer
 } from './studioCollage'
 import {
@@ -36,15 +35,6 @@ type StudioProps = {
   onOpenSettings: () => void
 }
 
-type ImageAdjustments = {
-  brightness: number
-  contrast: number
-  saturation: number
-  rotation: number
-  flipHorizontal: boolean
-  filterPreset: ImageFilterPreset
-}
-
 type TimelineClip = {
   id: string
   videoId: string
@@ -61,27 +51,6 @@ type TimelineEffect = {
   track: number
 }
 
-const defaultAdjustments: ImageAdjustments = {
-  brightness: 0,
-  contrast: 0,
-  saturation: 0,
-  rotation: 0,
-  flipHorizontal: false,
-  filterPreset: 'none'
-}
-
-const filterPresets: Array<{ id: ImageFilterPreset; label: string }> = [
-  { id: 'none', label: 'Original' },
-  { id: 'pb', label: 'P&B' },
-  { id: 'sepia', label: 'Sepia' },
-  { id: 'noir', label: 'Noir' },
-  { id: 'retro', label: 'Retro' },
-  { id: 'chrome', label: 'Chrome' },
-  { id: 'film', label: 'Filme' },
-  { id: 'warm', label: 'Quente' }
-]
-
-const PREVIEW_MAX_SIDE = 960
 const PREVIEW_DEBOUNCE_MS = 140
 const TIMELINE_LABEL_WIDTH = 86
 const TIMELINE_SECONDS_WIDTH = 92
@@ -293,9 +262,6 @@ function StudioContent({ language, onBack, onOpenSettings }: Omit<StudioProps, '
   const [mode, setMode] = useState<StudioMode>('edit')
   const [selectedId, setSelectedId] = useState<string | null>(library[0]?.id ?? null)
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(videoLibrary[0]?.id ?? null)
-  const [adjustments, setAdjustments] = useState<ImageAdjustments>(defaultAdjustments)
-  const [editPreviewUrl, setEditPreviewUrl] = useState<string | null>(null)
-  const [previewBusy, setPreviewBusy] = useState(false)
   const [layoutId, setLayoutId] = useState<CollageLayoutId>('hero-left')
   const [slotImages, setSlotImages] = useState<Array<string | null>>(collageLayouts[4]!.cells.map(() => null))
   const [slotPositions, setSlotPositions] = useState<CollageSlotPosition[]>(collageLayouts[4]!.cells.map(() => ({ x: 0.5, y: 0.5 })))
@@ -333,6 +299,7 @@ function StudioContent({ language, onBack, onOpenSettings }: Omit<StudioProps, '
   const [timelineScrubbing, setTimelineScrubbing] = useState(false)
   const [status, setStatus] = useState('')
   const previewRequestRef = useRef(0)
+  const photoEditorRef = useRef<PhotoEditorHandle>(null)
   const studioVideoPreviewRef = useRef<HTMLVideoElement | null>(null)
   const timelineBodyRef = useRef<HTMLDivElement | null>(null)
   const videoLabels = resolveStudioVideoCopy(language)
@@ -348,7 +315,6 @@ function StudioContent({ language, onBack, onOpenSettings }: Omit<StudioProps, '
         if (captures[0]) {
           setSelectedId(captures[0].id)
           setMode('edit')
-          setAdjustments(defaultAdjustments)
         }
       } catch { if (active) setStatus(t(language, 'studioRenderFailed')) }
     }
@@ -482,47 +448,6 @@ function StudioContent({ language, onBack, onOpenSettings }: Omit<StudioProps, '
       window.removeEventListener('mouseup', onMouseUp)
     }
   }, [timelineScrubbing, selectedVideoDuration, videoMagnetic])
-
-  useEffect(() => {
-    if (mode !== 'edit' || !selectedImage) {
-      setEditPreviewUrl(null)
-      setPreviewBusy(false)
-      return
-    }
-
-    const requestId = previewRequestRef.current + 1
-    previewRequestRef.current = requestId
-    setPreviewBusy(true)
-
-    const timer = window.setTimeout(() => {
-      void applyImageAdjustments(selectedImage.dataUrl, adjustments, {
-        maxSide: PREVIEW_MAX_SIDE,
-        format: 'jpeg',
-        quality: 0.86
-      })
-        .then((url) => {
-          if (previewRequestRef.current !== requestId) {
-            return
-          }
-
-          setEditPreviewUrl(url)
-          setPreviewBusy(false)
-        })
-        .catch(() => {
-          if (previewRequestRef.current !== requestId) {
-            return
-          }
-
-          setEditPreviewUrl(null)
-          setPreviewBusy(false)
-          setStatus(t(language, 'studioRenderFailed'))
-        })
-    }, PREVIEW_DEBOUNCE_MS)
-
-    return () => {
-      window.clearTimeout(timer)
-    }
-  }, [mode, selectedImage, adjustments, language])
 
   useEffect(() => {
     if (mode !== 'collage') {
@@ -908,7 +833,8 @@ function StudioContent({ language, onBack, onOpenSettings }: Omit<StudioProps, '
         }
 
         setStatus(t(language, 'studioRendering'))
-        const dataUrl = await applyImageAdjustments(selectedImage.dataUrl, adjustments, { maxSide: 4096, format: 'png' })
+        const dataUrl = await photoEditorRef.current?.exportImage()
+        if (!dataUrl) return
         const result = await window.gcpshot.exportStudioImage(dataUrl)
         setStatus(result.ok ? t(language, 'studioExported', { path: result.path ?? '' }) : result.error ?? t(language, 'saveFailed'))
         return
@@ -958,10 +884,19 @@ function StudioContent({ language, onBack, onOpenSettings }: Omit<StudioProps, '
     setSlotPositions(activeLayout.cells.map(() => ({ x: 0.5, y: 0.5 })))
   }
 
-  function addSelectedAsLayer(): void {
-    const image = selectedImage
+  async function addSelectedAsLayer(): Promise<void> {
+    let image = selectedImage
     if (!image) {
       return
+    }
+    if (mode === 'edit' && photoEditorRef.current) {
+      try {
+        const dataUrl = await photoEditorRef.current.exportImage()
+        const decoded = new Image()
+        decoded.src = dataUrl
+        await decoded.decode()
+        image = { ...image, dataUrl, width: decoded.naturalWidth, height: decoded.naturalHeight }
+      } catch { setStatus(t(language, 'studioRenderFailed')); return }
     }
 
     const layer: ImageLayer = {
@@ -1019,10 +954,6 @@ function StudioContent({ language, onBack, onOpenSettings }: Omit<StudioProps, '
     })
   }
 
-  function resetAdjustments(): void {
-    setAdjustments(defaultAdjustments)
-  }
-
   function saveEditedToLibrary(): void {
     if (!selectedImage) {
       return
@@ -1030,17 +961,19 @@ function StudioContent({ language, onBack, onOpenSettings }: Omit<StudioProps, '
 
     setStatus(t(language, 'studioRendering'))
 
-    void applyImageAdjustments(selectedImage.dataUrl, adjustments, { maxSide: 4096, format: 'png' })
-      .then((dataUrl) => {
+    void photoEditorRef.current?.exportImage()
+      .then(async (dataUrl) => {
+        const decoded = new Image()
+        decoded.src = dataUrl
+        await decoded.decode()
         const image = addStudioImage({
           name: `${selectedImage.name} (editado)`,
           dataUrl,
-          width: selectedImage.width,
-          height: selectedImage.height
+          width: decoded.naturalWidth,
+          height: decoded.naturalHeight
         })
         setLibrary((current) => [image, ...current])
         setSelectedId(image.id)
-        setAdjustments(defaultAdjustments)
         setStatus(t(language, 'studioSavedToLibrary'))
       })
       .catch(() => {
@@ -1051,12 +984,6 @@ function StudioContent({ language, onBack, onOpenSettings }: Omit<StudioProps, '
   function selectImage(id: string): void {
     previewRequestRef.current += 1
     setSelectedId(id)
-    setAdjustments(defaultAdjustments)
-    setEditPreviewUrl(null)
-  }
-
-  function updateAdjustment<K extends keyof ImageAdjustments>(key: K, value: ImageAdjustments[K]): void {
-    setAdjustments((current) => ({ ...current, [key]: value }))
   }
 
   return (
@@ -1520,15 +1447,7 @@ function StudioContent({ language, onBack, onOpenSettings }: Omit<StudioProps, '
           <div className="studio-canvas-wrap">
             {mode === 'edit' ? (
               selectedImage ? (
-                <>
-                  {editPreviewUrl ? (
-                    <img className="studio-canvas-image" src={editPreviewUrl} alt={selectedImage.name} decoding="async" />
-                  ) : (
-                    <div className="studio-canvas-empty">
-                      <strong>{previewBusy ? t(language, 'studioRendering') : t(language, 'studioCanvasEmptyTitle')}</strong>
-                    </div>
-                  )}
-                </>
+                <PhotoEditor key={selectedImage.id} ref={photoEditorRef} source={selectedImage.dataUrl} name={selectedImage.name} onSave={saveEditedToLibrary} onLayer={addSelectedAsLayer} />
               ) : (
                 <div className="studio-canvas-empty">
                   <strong>{t(language, 'studioCanvasEmptyTitle')}</strong>
@@ -1554,75 +1473,8 @@ function StudioContent({ language, onBack, onOpenSettings }: Omit<StudioProps, '
             )}
           </div>
 
-          <aside className="studio-controls">
-            {mode === 'edit' ? (
-              <>
-                <h3>{t(language, 'studioAdjustments')}</h3>
-                <div className="studio-filter-grid">
-                  {filterPresets.map((preset) => (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      className={adjustments.filterPreset === preset.id ? 'studio-filter-card active' : 'studio-filter-card'}
-                      onClick={() => updateAdjustment('filterPreset', preset.id)}
-                    >
-                      {selectedImage ? <img className={`studio-filter-preview filter-${preset.id}`} src={selectedImage.dataUrl} alt="" /> : <span className={`studio-filter-preview filter-${preset.id}`} />}
-                      <strong>{preset.label}</strong>
-                    </button>
-                  ))}
-                </div>
-                <label className="studio-slider">
-                  <span>{t(language, 'studioBrightness')}</span>
-                  <input
-                    type="range"
-                    min="-40"
-                    max="40"
-                    value={adjustments.brightness}
-                    onChange={(event) => updateAdjustment('brightness', Number(event.currentTarget.value))}
-                  />
-                </label>
-                <label className="studio-slider">
-                  <span>{t(language, 'studioContrast')}</span>
-                  <input
-                    type="range"
-                    min="-40"
-                    max="40"
-                    value={adjustments.contrast}
-                    onChange={(event) => updateAdjustment('contrast', Number(event.currentTarget.value))}
-                  />
-                </label>
-                <label className="studio-slider">
-                  <span>{t(language, 'studioSaturation')}</span>
-                  <input
-                    type="range"
-                    min="-60"
-                    max="60"
-                    value={adjustments.saturation}
-                    onChange={(event) => updateAdjustment('saturation', Number(event.currentTarget.value))}
-                  />
-                </label>
-                <div className="studio-button-row">
-                  <button type="button" className="ghost-button" onClick={() => updateAdjustment('rotation', adjustments.rotation - 90)}>
-                    ↺
-                  </button>
-                  <button type="button" className="ghost-button" onClick={() => updateAdjustment('rotation', adjustments.rotation + 90)}>
-                    ↻
-                  </button>
-                  <button type="button" className="ghost-button" onClick={() => updateAdjustment('flipHorizontal', !adjustments.flipHorizontal)}>
-                    ⇋
-                  </button>
-                </div>
-                <button type="button" className="ghost-button" onClick={resetAdjustments}>
-                  {t(language, 'studioReset')}
-                </button>
-                <button type="button" className="ghost-button" onClick={addSelectedAsLayer} disabled={!selectedImage}>
-                  Adicionar como camada
-                </button>
-                <button type="button" className="primary-button" onClick={saveEditedToLibrary} disabled={!selectedImage || previewBusy}>
-                  {t(language, 'studioSaveVariant')}
-                </button>
-              </>
-            ) : mode === 'collage' ? (
+          <aside className="studio-controls" style={mode === 'edit' ? { display: 'none' } : undefined}>
+            {mode === 'collage' ? (
               <>
                 <h3>{t(language, 'studioCollageLayout')}</h3>
                 <div className="studio-layout-grid">

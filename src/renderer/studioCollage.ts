@@ -187,7 +187,7 @@ export async function renderCollage(options: {
   return canvas.toDataURL('image/png')
 }
 
-function filterPresetToCanvasFilter(
+export function filterPresetToCanvasFilter(
   preset: ImageFilterPreset | undefined,
   adjustments: { brightness: number; contrast: number; saturation: number }
 ): string {

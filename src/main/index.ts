@@ -405,6 +405,7 @@ function createTray(): void {
       { label: 'Minhas Paletas', icon: trayMenuIcon('palettes'), click: () => openColorWindow('palettes') },
       { label: 'Live Color', icon: trayMenuIcon('live'), accelerator: settings.liveColorShortcut, click: () => void beginLiveColor().then((result) => { if (result.error) notify('Live Color', result.error) }) },
       { type: 'separator' },
+      { label: 'Configurações', icon: trayMenuIcon('settings'), click: openSettingsWindow },
       {
         label: process.platform === 'win32' ? 'Iniciar com o Windows' : 'Iniciar com o sistema',
         icon: trayMenuIcon('startup'),
@@ -430,23 +431,6 @@ function createTray(): void {
 
 function trayMenuIcon(name: string): Electron.NativeImage {
   return nativeImage.createFromPath(join(__dirname, '../../build/tray', `${name}-${nativeTheme.shouldUseDarkColors ? 'light' : 'dark'}.png`)).resize({ width: 16, height: 16 })
-}
-
-function cropThumbnailToWorkArea(thumbnail: Electron.NativeImage, display: Electron.Display): Electron.NativeImage {
-  const imageSize = thumbnail.getSize()
-  const bounds = display.bounds
-  const workArea = display.workArea
-  const scaleX = imageSize.width / bounds.width
-  const scaleY = imageSize.height / bounds.height
-
-  const cropRect = {
-    x: Math.max(0, Math.round((workArea.x - bounds.x) * scaleX)),
-    y: Math.max(0, Math.round((workArea.y - bounds.y) * scaleY)),
-    width: Math.max(1, Math.round(workArea.width * scaleX)),
-    height: Math.max(1, Math.round(workArea.height * scaleY))
-  }
-
-  return thumbnail.crop(cropRect)
 }
 
 async function beginOverlay(mode: CaptureMode, overlay: 'capture' | 'record', autoCopy = false): Promise<CaptureResult> {
@@ -478,10 +462,10 @@ async function beginOverlay(mode: CaptureMode, overlay: 'capture' | 'record', au
     return { ok: false, error: 'Nenhuma tela disponível para captura.' }
   }
 
-  const minX = Math.min(...displays.map((display) => display.workArea.x))
-  const minY = Math.min(...displays.map((display) => display.workArea.y))
-  const maxX = Math.max(...displays.map((display) => display.workArea.x + display.workArea.width))
-  const maxY = Math.max(...displays.map((display) => display.workArea.y + display.workArea.height))
+  const minX = Math.min(...displays.map((display) => display.bounds.x))
+  const minY = Math.min(...displays.map((display) => display.bounds.y))
+  const maxX = Math.max(...displays.map((display) => display.bounds.x + display.bounds.width))
+  const maxY = Math.max(...displays.map((display) => display.bounds.y + display.bounds.height))
   const desktopWidth = maxX - minX
   const desktopHeight = maxY - minY
 
@@ -490,25 +474,29 @@ async function beginOverlay(mode: CaptureMode, overlay: 'capture' | 'record', au
     sources[0]
   const primarySourceId = primarySource?.id ?? sources[0]?.id ?? ''
 
-  const segments = displays.map((display, index) => {
+  const segments = displays.flatMap((display, index) => {
     const source =
       sources.find((candidate) => candidate.display_id === String(display.id)) ??
-      sources[index] ??
-      sources[0]
-    const cropped = cropThumbnailToWorkArea(source.thumbnail, display)
-    const area = display.workArea
+      (displays.length === 1 ? sources[0] : undefined)
+    if (!source || source.thumbnail.isEmpty()) return []
+    const area = display.bounds
 
-    return {
-      dataUrl: cropped.toDataURL(),
+    return [{
+      dataUrl: source.thumbnail.toDataURL(),
       x: area.x - minX,
       y: area.y - minY,
       width: area.width,
       height: area.height,
       displayId: display.id,
+      label: display.label || `Monitor ${index + 1}`,
+      scaleFactor: display.scaleFactor,
+      pixelWidth: source.thumbnail.getSize().width,
+      pixelHeight: source.thumbnail.getSize().height,
       isPrimary: display.id === primaryDisplayId,
       screenSourceId: source.id
-    }
+    }]
   })
+  if (!segments.length) return { ok: false, error: 'Não foi possível identificar a tela autorizada. Verifique a permissão de captura do sistema.' }
 
   const window = new BrowserWindow({
     x: minX,
@@ -522,6 +510,7 @@ async function beginOverlay(mode: CaptureMode, overlay: 'capture' | 'record', au
     transparent: overlay === 'record',
     alwaysOnTop: true,
     skipTaskbar: true,
+    enableLargerThanScreen: true,
     backgroundColor: overlay === 'record' ? '#00000000' : '#05010a',
     icon: getAppIcon(),
     webPreferences: {

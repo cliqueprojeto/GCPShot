@@ -1,6 +1,6 @@
 {
   "name": "gcpshot",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "GCPShot - captura de tela premium da Gestão Cultural Pro.",
   "main": "out/main/index.js",
   "author": "Gestão Cultural Pro",
@@ -87,12 +87,24 @@
     },
     "dmg": {
       "background": "build/dmg-background.png",
-      "window": { "width": 660, "height": 420 },
+      "window": {
+        "width": 660,
+        "height": 420
+      },
       "iconSize": 108,
       "iconTextSize": 13,
       "contents": [
-        { "x": 180, "y": 240, "type": "file" },
-        { "x": 480, "y": 240, "type": "link", "path": "/Applications" }
+        {
+          "x": 180,
+          "y": 240,
+          "type": "file"
+        },
+        {
+          "x": 480,
+          "y": 240,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
     },
     "nsis": {
@@ -112,7 +124,8 @@
   "dependencies": {
     "lucide-react": "^1.59.0",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "react-image-crop": "^11.1.2"
   },
   "devDependencies": {
     "@types/node": "^26.1.0",

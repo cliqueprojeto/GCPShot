@@ -129,9 +129,10 @@ function magnifierAnchorFromPoint(point: Point, rect: CaptureRect, width: number
 }
 
 async function compositeCaptureSegments(segments: CaptureSegment[], width: number, height: number): Promise<string> {
+  const scale = Math.max(1, ...segments.map((segment) => (segment.pixelWidth ?? segment.width) / segment.width))
   const canvas = document.createElement('canvas')
-  canvas.width = Math.max(1, Math.round(width))
-  canvas.height = Math.max(1, Math.round(height))
+  canvas.width = Math.max(1, Math.round(width * scale))
+  canvas.height = Math.max(1, Math.round(height * scale))
   const context = canvas.getContext('2d')
 
   if (!context) {
@@ -142,7 +143,7 @@ async function compositeCaptureSegments(segments: CaptureSegment[], width: numbe
     const image = new Image()
     image.src = segment.dataUrl
     await image.decode()
-    context.drawImage(image, segment.x, segment.y, segment.width, segment.height)
+    context.drawImage(image, segment.x * scale, segment.y * scale, segment.width * scale, segment.height * scale)
   }
 
   return canvas.toDataURL('image/png')
@@ -1377,8 +1378,10 @@ function CaptureOverlay(): JSX.Element {
       const centerX = rect.x + rect.width / 2
       const centerY = rect.y + rect.height / 2
       const zoom = 2.15
-      const sourceCenterX = selectedRect.x * scaleX + centerX
-      const sourceCenterY = selectedRect.y * scaleY + centerY
+      const sourceRatioX = sourceImage.naturalWidth / ((payload?.virtualDesktop.width || window.innerWidth) * scaleX)
+      const sourceRatioY = sourceImage.naturalHeight / ((payload?.virtualDesktop.height || window.innerHeight) * scaleY)
+      const sourceCenterX = (selectedRect.x * scaleX + centerX) * sourceRatioX
+      const sourceCenterY = (selectedRect.y * scaleY + centerY) * sourceRatioY
       const screenWidth = Math.abs(to.x - from.x)
       const screenHeight = Math.abs(to.y - from.y)
       const radius = getMagnifierCornerRadius(action, screenWidth, screenHeight) * scale
@@ -1395,10 +1398,10 @@ function CaptureOverlay(): JSX.Element {
       context.clip()
       context.drawImage(
         sourceImage,
-        sourceCenterX - rect.width / zoom / 2,
-        sourceCenterY - rect.height / zoom / 2,
-        rect.width / zoom,
-        rect.height / zoom,
+        sourceCenterX - rect.width * sourceRatioX / zoom / 2,
+        sourceCenterY - rect.height * sourceRatioY / zoom / 2,
+        rect.width * sourceRatioX / zoom,
+        rect.height * sourceRatioY / zoom,
         rect.x,
         rect.y,
         rect.width,
@@ -1462,8 +1465,9 @@ function CaptureOverlay(): JSX.Element {
     image.src = captureBackdrop
     await image.decode()
 
-    const sourceScaleX = image.naturalWidth / window.innerWidth
-    const sourceScaleY = image.naturalHeight / window.innerHeight
+    const monitor = payload.segments.find((segment) => selectedRect.x >= segment.x && selectedRect.y >= segment.y && selectedRect.x + selectedRect.width <= segment.x + segment.width && selectedRect.y + selectedRect.height <= segment.y + segment.height)
+    const sourceScaleX = monitor ? (monitor.pixelWidth || monitor.width) / monitor.width : image.naturalWidth / payload.virtualDesktop.width
+    const sourceScaleY = monitor ? (monitor.pixelHeight || monitor.height) / monitor.height : image.naturalHeight / payload.virtualDesktop.height
     const canvas = document.createElement('canvas')
     canvas.width = Math.max(1, Math.round(selectedRect.width * sourceScaleX))
     canvas.height = Math.max(1, Math.round(selectedRect.height * sourceScaleY))
@@ -1473,17 +1477,17 @@ function CaptureOverlay(): JSX.Element {
       return null
     }
 
-    context.drawImage(
-      image,
-      selectedRect.x * sourceScaleX,
-      selectedRect.y * sourceScaleY,
-      selectedRect.width * sourceScaleX,
-      selectedRect.height * sourceScaleY,
-      0,
-      0,
-      canvas.width,
-      canvas.height
-    )
+    if (payload.segments.length) {
+      for (const segment of payload.segments) {
+        if (segment.x >= selectedRect.x + selectedRect.width || segment.y >= selectedRect.y + selectedRect.height || segment.x + segment.width <= selectedRect.x || segment.y + segment.height <= selectedRect.y) continue
+        const original = new Image()
+        original.src = segment.dataUrl
+        await original.decode()
+        context.drawImage(original, (segment.x - selectedRect.x) * sourceScaleX, (segment.y - selectedRect.y) * sourceScaleY, segment.width * sourceScaleX, segment.height * sourceScaleY)
+      }
+    } else {
+      context.drawImage(image, selectedRect.x * sourceScaleX, selectedRect.y * sourceScaleY, selectedRect.width * sourceScaleX, selectedRect.height * sourceScaleY, 0, 0, canvas.width, canvas.height)
+    }
 
     actions.forEach((action) => drawAction(context, action, sourceScaleX, sourceScaleY, image))
 
@@ -1601,6 +1605,12 @@ function CaptureOverlay(): JSX.Element {
     >
       {payload && (
         <>
+          {!scrimRect && payload.segments.map((segment, index) => (
+            <div key={`label-${segment.displayId}`} className="capture-display-label" style={{ left: segment.x + 18, top: segment.y + 18 }}>
+              <Monitor size={16} /><span>{segment.label || `Monitor ${index + 1}`}{segment.isPrimary ? ' · Principal' : ''}</span>
+              <small>{segment.pixelWidth || segment.width} × {segment.pixelHeight || segment.height} · {Math.round((segment.scaleFactor || 1) * 100)}%</small>
+            </div>
+          ))}
           {!backdropDataUrl &&
             payload.segments.map((segment) => (
               <img
