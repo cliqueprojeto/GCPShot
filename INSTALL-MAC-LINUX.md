@@ -18,7 +18,7 @@ Abra o arquivo .deb pelo instalador de aplicativos da distribuicao.
 Tambem pode instalar na pasta do arquivo com:
 
 ```sh
-sudo apt install ./GCPShot-0.4.2-Linux-x64.deb
+sudo apt install ./GCPShot-0.4.2-Linux-amd64.deb
 ```
 
 O pacote instala as dependencias e cria a entrada GCPShot no menu de aplicativos.
