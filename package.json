@@ -1,11 +1,12 @@
 {
   "name": "gcpshot",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "GCPShot - captura de tela premium da Gestão Cultural Pro.",
   "main": "out/main/index.js",
   "author": "Gestão Cultural Pro",
   "homepage": "https://www.gestaoculturalpro.com.br",
   "private": true,
+  "desktopName": "gcpshot.desktop",
   "scripts": {
     "test": "node scripts/test-colors.cjs && node scripts/test-branding-unit.cjs",
     "build:brand": "node scripts/build-brand-assets.cjs",
@@ -29,8 +30,13 @@
       "package.json"
     ],
     "win": {
+      "signAndEditExecutable": true,
       "artifactName": "GCPShot-${version}-Windows-x64.${ext}",
       "extraResources": [
+        {
+          "from": "build/icon.ico",
+          "to": "GCPShot.ico"
+        },
         {
           "from": "build/GCPShot.LiveColor.exe",
           "to": "GCPShot.LiveColor.exe"
@@ -71,6 +77,13 @@
       }
     },
     "linux": {
+      "syncDesktopName": true,
+      "desktop": {
+        "entry": {
+          "Name": "GCPShot",
+          "StartupWMClass": "gcpshot"
+        }
+      },
       "icon": "build/icon.png",
       "category": "Graphics",
       "target": [

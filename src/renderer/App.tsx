@@ -20,7 +20,6 @@ import { ContributionPanel, GCP_SITE_URL } from './ContributionPanel'
 import { LandingButton } from './LandingButton'
 import { Studio } from './Studio'
 import { ColorLab } from './ColorLab'
-import { pushCaptureToStudioAsync } from './studioStorage'
 import {
   clampToolbarPosition,
   cursorForResizeHandle,
@@ -292,7 +291,7 @@ function Landing(): JSX.Element {
 
 function CaptureOverlay(): JSX.Element {
   const autoCopyStarted = useRef(false)
-  const copyInProgress = useRef(false)
+  const captureActionInProgress = useRef(false)
   const [payload, setPayload] = useState<CaptureImagePayload | null>(null)
   const [backdropDataUrl, setBackdropDataUrl] = useState<string | null>(null)
   const [settings, setSettings] = useState<AppSettings>(defaultAppSettings)
@@ -555,6 +554,13 @@ function CaptureOverlay(): JSX.Element {
       if (event.key === 'Enter' && pendingText) {
         event.preventDefault()
         commitPendingText()
+        return
+      }
+
+      const editingControl = event.target instanceof HTMLElement && (event.target.isContentEditable || event.target.closest('input, textarea, select, button, a, [role="button"]'))
+      if (event.key === 'Enter' && !event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !editingControl && selectedRect && payload) {
+        event.preventDefault()
+        void copySelection()
         return
       }
 
@@ -1501,55 +1507,37 @@ function CaptureOverlay(): JSX.Element {
   }
 
   async function copySelection(): Promise<void> {
-    if (copyInProgress.current) return
-    copyInProgress.current = true
+    return performSelectionAction('copy')
+  }
+
+  async function performSelectionAction(action: 'copy' | 'save' | 'print' | 'whatsapp'): Promise<void> {
+    if (captureActionInProgress.current) return
+    captureActionInProgress.current = true
     try {
       const exportPayload = await composeExport()
       if (!exportPayload) return
-      setStatus(t(language, 'copying'))
-      const result = await window.gcpshot.copyCapture(exportPayload)
-      if (!result.ok) setStatus(result.error ?? t(language, 'copyFailed'))
+      const start = { copy: 'copying', save: 'saving', print: 'printing', whatsapp: 'whatsappOpening' } as const
+      const failed = { copy: 'copyFailed', save: 'saveFailed', print: 'printFailed', whatsapp: 'whatsappFailed' } as const
+      setStatus(t(language, start[action]))
+      const commands = { copy: window.gcpshot.copyCapture, save: window.gcpshot.saveCapture, print: window.gcpshot.printCapture, whatsapp: window.gcpshot.shareWhatsApp }
+      const result = await commands[action](exportPayload)
+      if (!result.ok) setStatus(result.error ?? t(language, failed[action]))
     } catch {
-      setStatus(t(language, 'copyFailed'))
-    } finally { copyInProgress.current = false }
+      const failed = { copy: 'copyFailed', save: 'saveFailed', print: 'printFailed', whatsapp: 'whatsappFailed' } as const
+      setStatus(t(language, failed[action]))
+    } finally { captureActionInProgress.current = false }
   }
 
   async function saveSelection(): Promise<void> {
-    const exportPayload = await composeExport()
-    if (!exportPayload) {
-      return
-    }
-
-    setStatus(t(language, 'saving'))
-    const result = await window.gcpshot.saveCapture(exportPayload)
-    if (result.ok && exportPayload.exportedDataUrl) {
-      await pushCaptureToStudioAsync(exportPayload.exportedDataUrl)
-      setStatus(`${t(language, 'saved', { path: result.path ?? '' })} · ${t(language, 'studioAddedFromCapture')}`)
-    } else {
-      setStatus(result.ok ? t(language, 'saved', { path: result.path ?? '' }) : result.error ?? t(language, 'saveFailed'))
-    }
+    return performSelectionAction('save')
   }
 
   async function printSelection(): Promise<void> {
-    const exportPayload = await composeExport()
-    if (!exportPayload) {
-      return
-    }
-
-    setStatus(t(language, 'printing'))
-    const result = await window.gcpshot.printCapture(exportPayload)
-    setStatus(result.ok ? t(language, 'printDone') : result.error ?? t(language, 'printFailed'))
+    return performSelectionAction('print')
   }
 
   async function shareWhatsApp(): Promise<void> {
-    const exportPayload = await composeExport()
-    if (!exportPayload) {
-      return
-    }
-
-    setStatus(t(language, 'whatsappOpening'))
-    const result = await window.gcpshot.shareWhatsApp(exportPayload)
-    setStatus(result.ok ? t(language, 'whatsappReady') : result.error ?? t(language, 'whatsappFailed'))
+    return performSelectionAction('whatsapp')
   }
 
   const visibleActions = draftAction ? [...actions, draftAction] : actions
@@ -2229,7 +2217,7 @@ function CaptureOverlay(): JSX.Element {
             <button className="icon-tool" onClick={() => setSettingsOpen(true)} title={t(language, 'settings')}>
               <ActionIcon type="settings" />
             </button>
-            <button className="icon-tool strong" onClick={copySelection} title={actionTooltip(language, 'copyAction', 'copyShortcut', settings)}>
+            <button className="icon-tool strong" onClick={copySelection} title={`${actionTooltip(language, 'copyAction', 'copyShortcut', settings)} / Enter`}>
               <ActionIcon type="copy" />
             </button>
             <button className="icon-tool" onClick={saveSelection} title={actionTooltip(language, 'saveAction', 'saveShortcut', settings)}>

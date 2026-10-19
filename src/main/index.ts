@@ -1,7 +1,6 @@
 import {
   BrowserWindow,
   Menu,
-  Notification,
   Tray,
   app,
   clipboard,
@@ -36,11 +35,17 @@ let isQuitting = false
 let colorPickerProcess: ChildProcess | null = null
 let colorToastWindow: BrowserWindow | null = null
 let colorToastTimer: ReturnType<typeof setTimeout> | null = null
-let toastDestination: 'colors' | 'studio' = 'colors'
+let toastDestination: 'colors' | 'studio' | 'home' = 'colors'
 let showWelcome = false
 
 const isDev = Boolean(process.env.ELECTRON_RENDERER_URL)
-if (process.platform === 'linux') app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal')
+app.setName('GCPShot')
+if (process.platform === 'win32') app.setAppUserModelId('br.com.gestaoculturalpro.gcpshot')
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal')
+  app.commandLine.appendSwitch('class', 'gcpshot')
+  app.setDesktopName('gcpshot.desktop')
+}
 const settingsPath = (): string => join(app.getPath('userData'), 'settings.json')
 const defaultSettings = defaultAppSettings
 
@@ -135,16 +140,12 @@ function shouldStartHidden(): boolean {
   }
 }
 
-function notify(title: string, body: string): void {
-  if (!settings.showNotifications || !Notification.isSupported()) {
-    return
-  }
-
-  new Notification({ title, body }).show()
+function notify(title: string, body: string, destination: 'home' | 'studio' = 'home'): void {
+  showColorToast('', destination, { title, body })
 }
 
 function getAppIcon(): Electron.NativeImage {
-  const icon = nativeImage.createFromPath(join(__dirname, process.platform === 'win32' ? '../../build/icon.ico' : '../../build/icon.png'))
+  const icon = nativeImage.createFromPath(join(__dirname, '../../build/icon.png'))
 
   if (!icon.isEmpty()) {
     return icon
@@ -167,6 +168,20 @@ function getAppIcon(): Electron.NativeImage {
 
   return nativeImage.createFromDataURL(`data:image/svg+xml;charset=utf-8,${svg}`)
 }
+
+app.on('browser-window-created', (_event, window) => {
+  if (process.platform !== 'darwin') window.setIcon(getAppIcon())
+  if (process.platform === 'win32') {
+    const installedIcon = join(process.resourcesPath, 'GCPShot.ico')
+    window.setAppDetails({
+      appId: 'br.com.gestaoculturalpro.gcpshot',
+      appIconPath: existsSync(installedIcon) ? installedIcon : join(__dirname, '../../build/icon.ico'),
+      appIconIndex: 0,
+      relaunchCommand: app.isPackaged ? `"${process.execPath}"` : `"${process.execPath}" "${app.getAppPath()}"`,
+      relaunchDisplayName: 'GCPShot'
+    })
+  }
+})
 
 function loadRenderer(
   window: BrowserWindow,
@@ -357,16 +372,16 @@ function closeColorToast(): void {
   colorToastWindow = null
 }
 
-function showColorToast(hex: string, destination: 'colors' | 'studio' = 'colors'): void {
+function showColorToast(hex: string, destination: 'colors' | 'studio' | 'home' = 'colors', message?: { title: string; body: string }): void {
   closeColorToast()
   if (!settings.showNotifications) return
   toastDestination = destination
   const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
   const window = new BrowserWindow({
-    x: area.x + area.width - 382, y: area.y + area.height - 164,
-    width: 366, height: 146, frame: false, show: false, resizable: false,
+    x: Math.max(area.x + 8, area.x + area.width - 406), y: Math.max(area.y + 8, area.y + area.height - 208),
+    width: Math.min(390, area.width - 16), height: 188, frame: false, show: false, resizable: false,
     alwaysOnTop: true, skipTaskbar: true, backgroundColor: '#151923',
-    title: destination === 'studio' ? 'GCPShot - Captura copiada' : 'GCPShot - Cor copiada', icon: getAppIcon(),
+    title: `GCPShot - ${message?.title || (destination === 'studio' ? 'Captura copiada' : 'Cor copiada')}`, icon: getAppIcon(),
     webPreferences: { preload: join(__dirname, '../preload/index.js'), contextIsolation: true, nodeIntegration: false, sandbox: false }
   })
   colorToastWindow = window
@@ -377,7 +392,7 @@ function showColorToast(hex: string, destination: 'colors' | 'studio' = 'colors'
     colorToastTimer = setTimeout(closeColorToast, 12000)
   })
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-  void window.loadFile(join(__dirname, '../../build/color-toast.html'), { query: { hex, destination } })
+  void window.loadFile(join(__dirname, '../../build/color-toast.html'), { query: { hex, destination, title: message?.title || '', body: message?.body || '' } })
 }
 
 async function showAboutDialog(): Promise<void> {
@@ -626,6 +641,15 @@ function closeCaptureWindow(): void {
   captureWindow = null
 }
 
+function closeCaptureForSender(senderId: number): void {
+  if (captureWindows.some((window) => !window.isDestroyed() && window.webContents.id === senderId)) closeCaptureWindow()
+}
+
+async function rememberCapture(image: Electron.NativeImage): Promise<void> {
+  try { await storeCapture(image) }
+  catch (error) { console.error('GCPShot: não foi possível atualizar a biblioteca de capturas.', error) }
+}
+
 function registerIpc(): void {
   ipcMain.handle('app:welcome-finish', async (event, view: MainView) => {
     if (event.sender !== mainWindow?.webContents || !['home', 'studio', 'colors'].includes(view)) return
@@ -637,7 +661,8 @@ function registerIpc(): void {
     if (event.sender !== colorToastWindow?.webContents) return
     closeColorToast()
     if (toastDestination === 'studio') openStudioWindow()
-    else openColorWindow('colors')
+    else if (toastDestination === 'colors') openColorWindow('colors')
+    else showMainWindow()
   })
   ipcMain.on('colors:toast-dismiss', (event) => {
     if (event.sender === colorToastWindow?.webContents) closeColorToast()
@@ -705,40 +730,42 @@ function registerIpc(): void {
   })
   ipcMain.handle(
     'capture:copy',
-    async (_event, payload: CaptureExportPayload): Promise<CaptureResult> => {
+    async (event, payload: CaptureExportPayload): Promise<CaptureResult> => {
+      const senderId = event.sender.id
       const image = imageFromExportPayload(payload)
       if (image.isEmpty()) return { ok: false, error: 'Nao foi possivel compor a captura.' }
       await storeCapture(image)
       clipboard.writeImage(image)
-      closeCaptureWindow()
+      closeCaptureForSender(senderId)
       showColorToast('', 'studio')
       return { ok: true }
     }
   )
   ipcMain.handle(
     'capture:save',
-    async (_event, payload: CaptureExportPayload): Promise<CaptureResult> => {
-      const image = imageFromExportPayload(payload)
-      const extension = settings.defaultFormat
-      const { canceled, filePath } = await dialog.showSaveDialog(captureWindow ?? mainWindow ?? undefined, {
-        title: 'Salvar captura',
-        defaultPath: `GCPShot-${new Date().toISOString().replace(/[:.]/g, '-')}.${extension}`,
-        filters: [
-          { name: 'Imagem PNG', extensions: ['png'] },
-          { name: 'Imagem JPEG', extensions: ['jpeg', 'jpg'] },
-          { name: 'PDF', extensions: ['pdf'] }
-        ]
-      })
+    async (event, payload: CaptureExportPayload): Promise<CaptureResult> => {
+      const senderId = event.sender.id
+      try {
+        const image = imageFromExportPayload(payload)
+        if (image.isEmpty()) return { ok: false, error: 'Não foi possível compor a captura.' }
+        const extension = settings.defaultFormat
+        const { canceled, filePath } = await dialog.showSaveDialog(captureWindow ?? mainWindow ?? undefined, {
+          title: 'Salvar captura',
+          defaultPath: `GCPShot-${new Date().toISOString().replace(/[:.]/g, '-')}.${extension}`,
+          filters: [
+            { name: 'Imagem PNG', extensions: ['png'] },
+            { name: 'Imagem JPEG', extensions: ['jpeg', 'jpg'] },
+            { name: 'PDF', extensions: ['pdf'] }
+          ]
+        })
 
-      if (canceled || !filePath) {
-        return { ok: false, error: 'Salvamento cancelado.' }
-      }
+        if (canceled || !filePath) return { ok: false, error: 'Salvamento cancelado.' }
 
-      const chosenExtension = extname(filePath).toLowerCase()
+        const chosenExtension = extname(filePath).toLowerCase()
 
-      if (chosenExtension === '.pdf') {
-        const pdfWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true } })
-        const html = encodeURIComponent(`
+        if (chosenExtension === '.pdf') {
+          const pdfWindow = new BrowserWindow({ show: false, title: 'Exportar PDF - GCPShot', icon: getAppIcon(), webPreferences: { sandbox: true } })
+          const html = encodeURIComponent(`
           <!doctype html>
           <html>
             <body style="margin:0;display:grid;place-items:center;min-height:100vh;">
@@ -747,21 +774,24 @@ function registerIpc(): void {
           </html>
         `)
 
-        await pdfWindow.loadURL(`data:text/html;charset=utf-8,${html}`)
-        await writeFile(filePath, await pdfWindow.webContents.printToPDF({ printBackground: true }))
-        pdfWindow.close()
-      } else {
-        await writeFile(filePath, chosenExtension === '.png' ? image.toPNG() : image.toJPEG(92))
-      }
-      notify('Captura salva', filePath)
-      if (!settings.keepSelectionAfterAction) {
-        closeCaptureWindow()
-      }
-      return { ok: true, path: filePath }
+          try {
+            await pdfWindow.loadURL(`data:text/html;charset=utf-8,${html}`)
+            await writeFile(filePath, await pdfWindow.webContents.printToPDF({ printBackground: true }))
+          } finally { if (!pdfWindow.isDestroyed()) pdfWindow.destroy() }
+        } else {
+          await writeFile(filePath, chosenExtension === '.png' ? image.toPNG() : image.toJPEG(92))
+        }
+        await rememberCapture(image)
+        closeCaptureForSender(senderId)
+        notify('Captura salva', filePath, 'studio')
+        return { ok: true, path: filePath }
+      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : 'Não foi possível salvar a captura.' } }
     }
   )
-  ipcMain.handle('capture:print', async (_event, payload: CaptureExportPayload): Promise<CaptureResult> => {
+  ipcMain.handle('capture:print', async (event, payload: CaptureExportPayload): Promise<CaptureResult> => {
+    const senderId = event.sender.id
     const image = imageFromExportPayload(payload)
+    if (image.isEmpty()) return { ok: false, error: 'Não foi possível compor a captura.' }
     const printWindow = new BrowserWindow({
       width: 760,
       height: 560,
@@ -784,37 +814,50 @@ function registerIpc(): void {
       </html>
     `)
 
-    await printWindow.loadURL(`data:text/html;charset=utf-8,${html}`)
+    try { await printWindow.loadURL(`data:text/html;charset=utf-8,${html}`) }
+    catch (error) {
+      if (!printWindow.isDestroyed()) printWindow.destroy()
+      return { ok: false, error: error instanceof Error ? error.message : 'Não foi possível abrir a impressão.' }
+    }
     printWindow.show()
     printWindow.setAlwaysOnTop(true, 'screen-saver')
     printWindow.moveTop()
     printWindow.focus()
 
     return new Promise((resolve) => {
-      setTimeout(() => {
-        printWindow.webContents.print({}, (success, failureReason) => {
-        printWindow.close()
-        if (success) {
-          notify('Captura enviada para impressão', 'O diálogo de impressão foi aberto.')
-          if (!settings.keepSelectionAfterAction) {
-            closeCaptureWindow()
-          }
+      let settled = false
+      const complete = (success: boolean, reason?: string): void => {
+        if (settled) return
+        settled = true
+        if (!printWindow.isDestroyed()) printWindow.destroy()
+        if (!success) { resolve({ ok: false, error: reason || 'Impressão cancelada.' }); return }
+        void rememberCapture(image).then(() => {
+          closeCaptureForSender(senderId)
+          notify('Captura enviada para impressão', 'A imagem foi enviada para a fila de impressão.', 'studio')
           resolve({ ok: true })
-          return
-        }
-
-        resolve({ ok: false, error: failureReason })
-      })
+        })
+      }
+      printWindow.once('closed', () => complete(false, 'Impressão cancelada.'))
+      setTimeout(() => {
+        if (settled || printWindow.isDestroyed()) return
+        try { printWindow.webContents.print({}, complete) }
+        catch (error) { complete(false, error instanceof Error ? error.message : 'Falha na impressão.') }
       }, 250)
     })
   })
-  ipcMain.handle('capture:share-whatsapp', async (_event, payload: CaptureExportPayload): Promise<CaptureResult> => {
-    const image = imageFromExportPayload(payload)
-    clipboard.writeImage(image)
-    await shell.openExternal('https://web.whatsapp.com/')
-    notify('Imagem copiada', 'O WhatsApp Web foi aberto. Cole a captura com Ctrl+V.')
+  ipcMain.handle('capture:share-whatsapp', async (event, payload: CaptureExportPayload): Promise<CaptureResult> => {
+    const senderId = event.sender.id
+    try {
+      const image = imageFromExportPayload(payload)
+      if (image.isEmpty()) return { ok: false, error: 'Não foi possível compor a captura.' }
+      clipboard.writeImage(image)
+      await shell.openExternal('https://web.whatsapp.com/')
+      await rememberCapture(image)
+      closeCaptureForSender(senderId)
+      notify('Pronta para o WhatsApp', `Imagem copiada. Cole a captura no WhatsApp Web com ${process.platform === 'darwin' ? 'Cmd+V' : 'Ctrl+V'}.`, 'studio')
 
-    return { ok: true }
+      return { ok: true }
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : 'Não foi possível abrir o WhatsApp Web.' } }
   })
   ipcMain.handle('settings:get', () => settings)
   ipcMain.handle('settings:update', async (_event, patch: Partial<AppSettings>): Promise<AppSettings> => {
@@ -968,14 +1011,10 @@ async function updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>
 }
 
 app.whenReady().then(async () => {
-  app.setName('GCPShot')
+  if (process.platform === 'darwin') app.dock?.setIcon(getAppIcon())
   settings = await loadSettings()
   showWelcome = await readFile(join(app.getPath('userData'), 'welcome-version.txt'), 'utf8').then((version) => version !== app.getVersion()).catch(() => true)
   await loadColorLibrary()
-
-  if (process.platform === 'win32') {
-    app.setAppUserModelId('br.com.gestaoculturalpro.gcpshot')
-  }
 
   applyLoginItemSettings()
   registerIpc()
@@ -989,9 +1028,7 @@ app.whenReady().then(async () => {
   registerShortcuts()
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createMainWindow()
-    }
+    if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
   })
 })
 

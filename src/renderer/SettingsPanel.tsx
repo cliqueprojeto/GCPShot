@@ -203,14 +203,6 @@ export function SettingsPanel({
             <label>
               <input
                 type="checkbox"
-                checked={settings.keepSelectionAfterAction}
-                onChange={(event) => onUpdateSetting({ keepSelectionAfterAction: event.currentTarget.checked })}
-              />
-              <span>{t(language, 'keepSelection')}</span>
-            </label>
-            <label>
-              <input
-                type="checkbox"
                 checked={settings.captureCursor}
                 onChange={(event) => onUpdateSetting({ captureCursor: event.currentTarget.checked })}
               />

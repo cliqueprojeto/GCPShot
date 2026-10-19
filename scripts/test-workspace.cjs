@@ -11,6 +11,7 @@ const assert = require('node:assert/strict')
       await page.getByRole('button', { name: 'Começar', exact: true }).click()
     }
     await page.getByRole('heading', { name: 'O que vamos criar hoje?' }).waitFor()
+    await require('./test-app-identity.cjs')(app, page)
     await require('./test-branding.cjs')(app, page)
     await page.screenshot({ path: 'release/workspace-home-0.6.0.png', fullPage: true })
     for (const name of ['Color Lab', 'Minhas Paletas', 'Estúdio', 'Captura']) {
@@ -18,6 +19,7 @@ const assert = require('node:assert/strict')
       assert.equal(await page.locator('.workspace-sidebar').count(), 1)
     }
     await require('./test-capture-flow.cjs')(app, page)
+    await require('./test-capture-actions.cjs')(app, page)
     await require('./test-photo-editor.cjs')(app, page)
     await page.screenshot({ path: 'release/workspace-studio-0.6.0.png' })
     console.log('Unified navigation and capture workflows passed.')
