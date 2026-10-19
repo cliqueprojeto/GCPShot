@@ -84,6 +84,8 @@ final class MagnifierView: NSView {
         panel.ignoresMouseEvents = true
         panel.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
+        do { content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) }
+        catch { fail(error.localizedDescription); return }
         print("READY"); fflush(stdout)
         while !finished {
             if parent > 0 && kill(parent, 0) != 0 { finish("CANCEL"); return }

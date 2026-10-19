@@ -7,7 +7,7 @@
 
 static GtkWidget *panel;
 static GdkPixbuf *pixels;
-static int red, green, blue, parent_pid;
+static int red, green, blue, parent_pid, center_x = 13, center_y = 6;
 static gboolean finishing = FALSE;
 
 static void finish(gboolean selected) {
@@ -36,6 +36,7 @@ static gboolean render(gpointer unused) {
     GdkWindow *root = gdk_get_default_root_window();
     int sx = MAX(0, MIN(x - 13, gdk_window_get_width(root) - 27));
     int sy = MAX(0, MIN(y - 6, gdk_window_get_height(root) - 13));
+    center_x = x - sx; center_y = y - sy;
     GdkPixbuf *next = gdk_pixbuf_get_from_window(root, sx, sy, 27, 13);
     if (!next) return G_SOURCE_CONTINUE;
     if (pixels) g_object_unref(pixels);
@@ -57,7 +58,7 @@ static gboolean draw(GtkWidget *widget, cairo_t *cr, gpointer unused) {
     }
     cairo_set_source_rgb(cr, 0.61, 0.63, 1); cairo_set_line_width(cr, 1);
     cairo_rectangle(cr, 0.5, 0.5, 266, 197); cairo_stroke(cr);
-    cairo_rectangle(cr, 129.5, 66.5, 8, 8); cairo_stroke(cr);
+    cairo_rectangle(cr, 12.5 + center_x * 9, 12.5 + center_y * 9, 8, 8); cairo_stroke(cr);
     cairo_select_font_face(cr, "sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL); cairo_set_font_size(cr, 11);
     char value[80]; snprintf(value, sizeof(value), "#%02X%02X%02X   rgb(%d, %d, %d)", red, green, blue, red, green, blue);
     cairo_set_source_rgb(cr, 1, 1, 1); cairo_move_to(cr, 11, 147); cairo_show_text(cr, value);

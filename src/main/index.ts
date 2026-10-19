@@ -35,6 +35,7 @@ let colorToastWindow: BrowserWindow | null = null
 let colorToastTimer: ReturnType<typeof setTimeout> | null = null
 
 const isDev = Boolean(process.env.ELECTRON_RENDERER_URL)
+if (process.platform === 'linux') app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal')
 const settingsPath = (): string => join(app.getPath('userData'), 'settings.json')
 const defaultSettings = defaultAppSettings
 

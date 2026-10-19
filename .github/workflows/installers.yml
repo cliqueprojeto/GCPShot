@@ -36,7 +36,7 @@ jobs:
       - run: npm run build
       - name: Test Linux picker
         if: matrix.platform == 'linux'
-        run: xvfb-run -a node scripts/test-linux-picker.cjs
+        run: xvfb-run -a -s '-screen 0 1280x800x24 -noreset' node scripts/test-linux-picker.cjs
       - name: Package installers
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
