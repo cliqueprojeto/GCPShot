@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AppSettings,
   CaptureAction,
@@ -13,7 +13,9 @@ import { defaultAppSettings } from '../shared/capture'
 import type { AppLanguage } from '../shared/i18n'
 import { t } from '../shared/i18n'
 import packageJson from '../../package.json'
-import logoGcp from './assets/logo-gcp.png'
+import appIcon from '../../build/icon.png'
+import { Scan, Monitor, Images, Pipette, Palette, Crosshair, ArrowUpRight } from 'lucide-react'
+import { WorkspaceShell } from './WorkspaceShell'
 import { ContributionPanel, GCP_SITE_URL } from './ContributionPanel'
 import { LandingButton } from './LandingButton'
 import { Studio } from './Studio'
@@ -228,197 +230,68 @@ function Landing(): JSX.Element {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('general')
   const [recordingShortcut, setRecordingShortcut] = useState<SettingsShortcutKey | null>(null)
   const [status, setStatus] = useState('')
-
+  const [recent, setRecent] = useState<import('../shared/studio').StoredCapture[]>([])
   const language = settings.language
 
+  useEffect(() => { void window.gcpshot.getSettings().then(setSettings) }, [])
+  useEffect(() => { setStatus(t(language, 'readyToCapture', { shortcut: settings.captureShortcut })) }, [language, settings.captureShortcut])
+  useEffect(() => window.gcpshot.onOpenSettings(() => setSettingsOpen(true)), [])
+  useEffect(() => window.gcpshot.onOpenStudio(() => { setSettingsOpen(false); setView('studio') }), [])
+  useEffect(() => window.gcpshot.onOpenColors((next) => { setSettingsOpen(false); setView(next) }), [])
   useEffect(() => {
-    void window.gcpshot.getSettings().then(setSettings)
-  }, [])
-
-  useEffect(() => {
-    setStatus(t(language, 'readyToCapture', { shortcut: settings.captureShortcut }))
-  }, [language, settings.captureShortcut])
-
-  useEffect(() => {
-    return window.gcpshot.onOpenSettings(() => setSettingsOpen(true))
-  }, [])
-
-  useEffect(() => {
-    return window.gcpshot.onOpenStudio(() => {
-      setSettingsOpen(false)
-      setView('studio')
-    })
-  }, [])
-
-  useEffect(() => window.gcpshot.onOpenColors((next) => {
-    setSettingsOpen(false)
-    setView(next)
-  }), [])
+    if (view === 'home') void window.gcpshot.getStoredCaptures().then((images) => setRecent(images.slice(0, 3))).catch(() => {})
+  }, [view])
 
   async function startCapture(mode: CaptureMode): Promise<void> {
     const result = await window.gcpshot.beginCapture(mode)
-    setStatus(
-      result.ok
-        ? mode === 'fullscreen'
-          ? t(language, 'fullscreenSelected')
-          : t(language, 'dragSelect')
-        : result.error ?? t(language, 'copyFailed')
-    )
+    if (!result.ok) setStatus(result.error ?? t(language, 'copyFailed'))
   }
-
-  async function openStudio(): Promise<void> {
-    setView('studio')
+  async function liveColor(): Promise<void> {
+    const result = await window.gcpshot.pickColor()
+    if (result.error) setStatus(result.error)
   }
-
   async function updateSetting(patch: Partial<AppSettings>): Promise<void> {
-    const nextSettings = await window.gcpshot.updateSettings(patch)
-    setSettings(nextSettings)
-    setStatus(t(nextSettings.language, 'settingsUpdated'))
+    setSettings(await window.gcpshot.updateSettings(patch))
+    setStatus(t(language, 'settingsUpdated'))
   }
-
   async function resetSettings(): Promise<void> {
-    const nextSettings = await window.gcpshot.resetSettings()
-    setSettings(nextSettings)
+    setSettings(await window.gcpshot.resetSettings())
     setRecordingShortcut(null)
-    setStatus(t(nextSettings.language, 'settingsReset'))
+    setStatus(t(language, 'settingsReset'))
   }
 
-  if (view === 'studio' || view === 'colors' || view === 'palettes') {
-    return (
-      <>
-        {view === 'studio' ? <Studio
-          language={language}
-          settings={settings}
-          onBack={() => setView('home')}
-          onOpenSettings={() => setSettingsOpen(true)}
-        /> : <ColorLab view={view} shortcut={settings.liveColorShortcut} onNavigate={setView} onSettings={() => setSettingsOpen(true)} />}
-        {settingsOpen && (
-          <SettingsPanel
-            settings={settings}
-            language={language}
-            settingsTab={settingsTab}
-            recordingShortcut={recordingShortcut}
-            onTabChange={setSettingsTab}
-            onClose={() => setSettingsOpen(false)}
-            onUpdateSetting={(patch) => void updateSetting(patch)}
-            onReset={() => void resetSettings()}
-            onRecordingShortcutChange={setRecordingShortcut}
-          />
-        )}
-      </>
-    )
-  }
+  const tools = [
+    { title: 'Capturar região', detail: 'Seleção livre da tela', shortcut: settings.captureShortcut, icon: Scan, action: () => void startCapture('region') },
+    { title: 'Tela inteira', detail: 'Capture seu monitor', shortcut: settings.fullscreenShortcut, icon: Monitor, action: () => void startCapture('fullscreen') },
+    { title: 'Estúdio de imagem', detail: 'Edite, componha e exporte', shortcut: settings.studioShortcut, icon: Images, action: () => setView('studio') },
+    { title: 'Color Lab', detail: 'Cores, harmonias e contraste', shortcut: '', icon: Pipette, action: () => setView('colors') },
+    { title: 'Minhas Paletas', detail: 'Sua biblioteca de cores', shortcut: '', icon: Palette, action: () => setView('palettes') },
+    { title: 'Live Color', detail: 'Uma cor em qualquer lugar', shortcut: settings.liveColorShortcut, icon: Crosshair, action: () => void liveColor() }
+  ]
 
-  return (
-    <main className="app-shell">
-      <section className="product-panel">
-        <header className="top-nav">
-          <div className="brand-row">
-            <a className="brand-mark logo-mark" href={GCP_SITE_URL} target="_blank" rel="noreferrer" aria-label="Gestão Cultural Pro">
-              <img src={logoGcp} alt="Gestão Cultural Pro" />
-            </a>
-            <div>
-              <p className="eyebrow">
-                <a href={GCP_SITE_URL} target="_blank" rel="noreferrer">
-                  Gestão Cultural Pro
-                </a>{' '}
-                Shot
-              </p>
-              <h1>{t(language, 'appName')}</h1>
-              <p className="developer-line">{t(language, 'developedBy')}</p>
-            </div>
-          </div>
-          <div className="nav-actions settings-nav-actions">
-            <button className="ghost-button" onClick={() => setView('colors')}>Color Lab</button>
-            <button className="ghost-button" onClick={() => setView('palettes')}>Minhas Paletas</button>
-            <span className="settings-pointer" aria-hidden="true">
-              <span className="settings-pointer-arrow" />
-              <span className="settings-pointer-label">{t(language, 'settingsArrowHint')}</span>
-            </span>
-            <button className="ghost-button settings-target-button" onClick={() => setSettingsOpen(true)}>
-              {t(language, 'settings')}
-            </button>
-            <LandingButton
-              label={t(language, 'openStudio')}
-              shortcut={settings.studioShortcut}
-              className="compact"
-              onClick={() => void openStudio()}
-            />
-          </div>
-        </header>
-
-        <div className="hero-grid">
-          <div className="hero-copy">
-            <p className="tag">{t(language, 'heroTag')}</p>
-            <h2>{t(language, 'heroTitle')}</h2>
-            <p className="subtitle">{t(language, 'heroSubtitle')}</p>
-
-            <div className="action-row">
-              <LandingButton
-                label={t(language, 'captureRegion')}
-                shortcut={settings.captureShortcut}
-                variant="primary"
-                onClick={() => void startCapture('region')}
-              />
-              <LandingButton
-                label={t(language, 'captureFullscreen')}
-                shortcut={settings.fullscreenShortcut}
-                onClick={() => void startCapture('fullscreen')}
-              />
-              {settings.printScreenShortcut && <span className="shortcut-pill">Print Screen</span>}
-            </div>
-
-            <p className="status-line">{status}</p>
-          </div>
-
-          <ContributionPanel language={language} />
-        </div>
-
-        <section className="feature-strip">
-          <article>
-            <strong>{t(language, 'featureTray')}</strong>
-            <span>{t(language, 'featureTrayDesc')}</span>
-          </article>
-          <article>
-            <strong>{t(language, 'featureAnnotate')}</strong>
-            <span>{t(language, 'featureAnnotateDesc')}</span>
-          </article>
-          <article>
-            <strong>{t(language, 'featureExport')}</strong>
-            <span>{t(language, 'featureExportDesc')}</span>
-          </article>
-          <article>
-            <strong>{t(language, 'featureStudio')}</strong>
-            <span>{t(language, 'featureStudioDesc')}</span>
-          </article>
-        </section>
-
-        <p className="credit-line">
-          {t(language, 'credit')} · v{packageJson.version} ·{' '}
-          <a href={GCP_SITE_URL} target="_blank" rel="noreferrer">
-            gestaoculturalpro.com.br
-          </a>
-        </p>
-      </section>
-
-      {settingsOpen && (
-        <SettingsPanel
-          settings={settings}
-          language={language}
-          settingsTab={settingsTab}
-          recordingShortcut={recordingShortcut}
-          onTabChange={setSettingsTab}
-          onClose={() => setSettingsOpen(false)}
-          onUpdateSetting={(patch) => void updateSetting(patch)}
-          onReset={() => void resetSettings()}
-          onRecordingShortcutChange={setRecordingShortcut}
-        />
-      )}
-    </main>
-  )
+  return <>
+    <WorkspaceShell view={view} version={packageJson.version} shortcut={settings.liveColorShortcut} onNavigate={setView} onLiveColor={() => void liveColor()} onSettings={() => setSettingsOpen(true)}>
+      {view === 'studio' ? <Studio language={language} settings={settings} onBack={() => setView('home')} onOpenSettings={() => setSettingsOpen(true)} />
+        : view === 'colors' || view === 'palettes' ? <ColorLab view={view} shortcut={settings.liveColorShortcut} onNavigate={setView} onSettings={() => setSettingsOpen(true)} />
+        : <main className="workspace-home">
+          <header className="workspace-page-heading"><div><small>SEU WORKSPACE</small><h1>O que vamos criar hoje?</h1></div><img src={appIcon} alt="" /></header>
+          <section className="workspace-tools" aria-label="Ferramentas">
+            {tools.map((item, index) => <button key={item.title} aria-label={'Abrir ' + item.title} className={'workspace-tool' + (index === 0 ? ' workspace-tool-primary' : '')} onClick={item.action}><item.icon size={24} strokeWidth={1.7} /><span><strong>{item.title}</strong><small>{item.detail}</small>{item.shortcut && <kbd>{item.shortcut}</kbd>}</span><ArrowUpRight size={17} /></button>)}
+          </section>
+          <p role="status" className="workspace-home-status">{status}</p>
+          <section className="workspace-recents"><header className="workspace-section-heading"><h2>Capturas recentes</h2><button onClick={() => setView('studio')}>Ver no Estúdio</button></header>
+            {recent.length ? <div className="workspace-recent-list">{recent.map((image) => <button key={image.id} onClick={() => setView('studio')}><img src={image.dataUrl} alt={image.name} /><span>{image.name}</span></button>)}</div> : <p className="workspace-empty">Suas próximas capturas aparecerão aqui.</p>}
+          </section>
+          <details className="workspace-support"><summary>Apoie o GCPShot</summary><ContributionPanel language={language} /></details>
+        </main>}
+    </WorkspaceShell>
+    {settingsOpen && <SettingsPanel settings={settings} language={language} settingsTab={settingsTab} recordingShortcut={recordingShortcut} onTabChange={setSettingsTab} onClose={() => setSettingsOpen(false)} onUpdateSetting={(patch) => void updateSetting(patch)} onReset={() => void resetSettings()} onRecordingShortcutChange={setRecordingShortcut} />}
+  </>
 }
 
 function CaptureOverlay(): JSX.Element {
+  const autoCopyStarted = useRef(false)
+  const copyInProgress = useRef(false)
   const [payload, setPayload] = useState<CaptureImagePayload | null>(null)
   const [backdropDataUrl, setBackdropDataUrl] = useState<string | null>(null)
   const [settings, setSettings] = useState<AppSettings>(defaultAppSettings)
@@ -519,6 +392,12 @@ function CaptureOverlay(): JSX.Element {
   }, [payload])
 
   const captureBackdrop = backdropDataUrl ?? payload?.dataUrl ?? ''
+
+  useEffect(() => {
+    if (!selectedRect || !captureBackdrop || !(payload?.autoCopy || settings.autoCopyAfterCapture) || autoCopyStarted.current) return
+    autoCopyStarted.current = true
+    void copySelection()
+  }, [selectedRect, captureBackdrop, payload?.autoCopy, settings.autoCopyAfterCapture])
 
   useEffect(() => {
     setStatus(t(language, 'dragSelect'))
@@ -1618,19 +1497,17 @@ function CaptureOverlay(): JSX.Element {
   }
 
   async function copySelection(): Promise<void> {
-    const exportPayload = await composeExport()
-    if (!exportPayload) {
-      return
-    }
-
-    setStatus(t(language, 'copying'))
-    const result = await window.gcpshot.copyCapture(exportPayload)
-    if (result.ok && exportPayload.exportedDataUrl) {
-      await pushCaptureToStudioAsync(exportPayload.exportedDataUrl)
-      setStatus(`${t(language, 'copied')} ${t(language, 'studioAddedFromCapture')}`)
-    } else {
-      setStatus(result.ok ? t(language, 'copied') : result.error ?? t(language, 'copyFailed'))
-    }
+    if (copyInProgress.current) return
+    copyInProgress.current = true
+    try {
+      const exportPayload = await composeExport()
+      if (!exportPayload) return
+      setStatus(t(language, 'copying'))
+      const result = await window.gcpshot.copyCapture(exportPayload)
+      if (!result.ok) setStatus(result.error ?? t(language, 'copyFailed'))
+    } catch {
+      setStatus(t(language, 'copyFailed'))
+    } finally { copyInProgress.current = false }
   }
 
   async function saveSelection(): Promise<void> {

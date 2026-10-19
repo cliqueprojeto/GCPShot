@@ -337,6 +337,26 @@ function StudioContent({ language, onBack, onOpenSettings }: Omit<StudioProps, '
   const timelineBodyRef = useRef<HTMLDivElement | null>(null)
   const videoLabels = resolveStudioVideoCopy(language)
 
+  useEffect(() => {
+    let active = true
+    async function refreshCaptures(): Promise<void> {
+      try {
+        const captures = await window.gcpshot.getStoredCaptures()
+        if (!active) return
+        const merged = [...captures, ...loadStudioLibrary()].sort((a, b) => b.createdAt - a.createdAt)
+        setLibrary(merged)
+        if (captures[0]) {
+          setSelectedId(captures[0].id)
+          setMode('edit')
+          setAdjustments(defaultAdjustments)
+        }
+      } catch { if (active) setStatus(t(language, 'studioRenderFailed')) }
+    }
+    void refreshCaptures()
+    const remove = window.gcpshot.onOpenStudio(() => void refreshCaptures())
+    return () => { active = false; remove() }
+  }, [language])
+
   const selectedImage = useMemo(
     () => library.find((item) => item.id === selectedId) ?? null,
     [library, selectedId]
@@ -596,7 +616,7 @@ function StudioContent({ language, onBack, onOpenSettings }: Omit<StudioProps, '
       })
     )
 
-    setLibrary(loadStudioLibrary())
+    setLibrary((current) => [...imported, ...current])
     setSelectedId(imported[0]?.id ?? selectedId)
     setStatus(t(language, 'studioImported', { count: String(imported.length) }))
   }
@@ -1018,7 +1038,7 @@ function StudioContent({ language, onBack, onOpenSettings }: Omit<StudioProps, '
           width: selectedImage.width,
           height: selectedImage.height
         })
-        setLibrary(loadStudioLibrary())
+        setLibrary((current) => [image, ...current])
         setSelectedId(image.id)
         setAdjustments(defaultAdjustments)
         setStatus(t(language, 'studioSavedToLibrary'))
@@ -1048,8 +1068,8 @@ function StudioContent({ language, onBack, onOpenSettings }: Omit<StudioProps, '
               ← {t(language, 'studioBack')}
             </button>
             <div>
-              <p className="eyebrow">{t(language, 'studioEyebrow')}</p>
-              <h1>{t(language, 'studioTitle')}</h1>
+              <p className="eyebrow">GCPShot / IMAGENS</p>
+              <h1>Estúdio de imagem</h1>
             </div>
           </div>
           <div className="nav-actions">
@@ -1483,12 +1503,13 @@ function StudioContent({ language, onBack, onOpenSettings }: Omit<StudioProps, '
                     active={selectedId === item.id}
                     onSelect={() => selectImage(item.id)}
                     onRemove={() => {
-                      removeStudioImage(item.id)
-                      const next = loadStudioLibrary()
-                      setLibrary(next)
-                      if (selectedId === item.id) {
-                        setSelectedId(next[0]?.id ?? null)
-                      }
+                      void (async () => {
+                        if (item.id.startsWith('capture-')) await window.gcpshot.removeStoredCapture(item.id)
+                        removeStudioImage(item.id)
+                        const next = library.filter((image) => image.id !== item.id)
+                        setLibrary(next)
+                        if (selectedId === item.id) setSelectedId(next[0]?.id ?? null)
+                      })().catch(() => setStatus(t(language, 'studioRenderFailed')))
                     }}
                   />
                 ))}
@@ -1545,7 +1566,7 @@ function StudioContent({ language, onBack, onOpenSettings }: Omit<StudioProps, '
                       className={adjustments.filterPreset === preset.id ? 'studio-filter-card active' : 'studio-filter-card'}
                       onClick={() => updateAdjustment('filterPreset', preset.id)}
                     >
-                      <span className={`studio-filter-preview filter-${preset.id}`} />
+                      {selectedImage ? <img className={`studio-filter-preview filter-${preset.id}`} src={selectedImage.dataUrl} alt="" /> : <span className={`studio-filter-preview filter-${preset.id}`} />}
                       <strong>{preset.label}</strong>
                     </button>
                   ))}

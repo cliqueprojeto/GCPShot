@@ -80,18 +80,6 @@ export function ColorLab({ view, shortcut, onNavigate, onSettings }: Props): JSX
   const foreground = luminance(hex) > 0.4 ? '#111111' : '#FFFFFF'
 
   return <main className="color-workspace">
-    <aside className="color-sidebar">
-      <strong className="color-brand">GCPShot</strong><span className="color-eyebrow">WORKSPACE</span>
-      <nav aria-label="Ferramentas">
-        <button aria-current={view === 'colors' ? 'page' : undefined} onClick={() => onNavigate('colors')}>01 <span>Color Lab</span></button>
-        <button aria-current={view === 'palettes' ? 'page' : undefined} onClick={() => onNavigate('palettes')}>02 <span>Minhas Paletas</span></button>
-        <button onClick={() => onNavigate('studio')}>03 <span>Estudio</span></button>
-        <button onClick={() => onNavigate('home')}>04 <span>Captura de tela</span></button>
-        <button onClick={onSettings}>05 <span>Configuracoes</span></button>
-      </nav>
-      <button className="color-live-button" disabled={picking || loading || busy} onClick={() => void pick()}>Live Color <kbd>{shortcut}</kbd></button>
-      <small>Local. Suas cores, seu trabalho.</small>
-    </aside>
     <section className="color-content" aria-busy={loading || busy}>
       <header className="color-header"><div><span className="color-eyebrow">GCPShot / CORES</span><h1>{view === 'colors' ? 'Color Lab' : 'Minhas Paletas'}</h1></div>
         {view === 'palettes' && <div className="color-actions"><button disabled={busy || loading} onClick={() => void importLibrary()}>Importar JSON</button><select aria-label="Exportar paletas" defaultValue="" disabled={busy || loading || !library.palettes.length} onChange={(e) => { const format = e.target.value as 'json' | 'css'; e.target.value = ''; void window.gcpshot.exportColorLibrary(format).then((ok) => { if (ok) setMessage('Paletas exportadas.') }).catch(fail) }}><option value="" disabled>Exportar</option><option value="json">JSON</option><option value="css">CSS</option></select></div>}

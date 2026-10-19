@@ -10,6 +10,7 @@ import {
   globalShortcut,
   ipcMain,
   nativeImage,
+  nativeTheme,
   screen,
   shell
 } from 'electron'
@@ -21,6 +22,7 @@ import type { AppSettings, CaptureExportPayload, CaptureMode, CaptureRect, Captu
 import { defaultAppSettings } from '../shared/capture'
 import { normalizeHex, parseLibrary, type ColorResult } from '../shared/colors'
 import { getColorLibrary, loadColorLibrary, saveColorLibrary } from './colorLibrary'
+import { getStoredCaptures, removeStoredCapture, storeCapture } from './captureStore'
 
 type MainView = 'home' | 'studio' | 'colors' | 'palettes'
 
@@ -33,6 +35,8 @@ let isQuitting = false
 let colorPickerProcess: ChildProcess | null = null
 let colorToastWindow: BrowserWindow | null = null
 let colorToastTimer: ReturnType<typeof setTimeout> | null = null
+let toastDestination: 'colors' | 'studio' = 'colors'
+let showWelcome = false
 
 const isDev = Boolean(process.env.ELECTRON_RENDERER_URL)
 if (process.platform === 'linux') app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal')
@@ -219,7 +223,8 @@ function createMainWindow(mainView: MainView = 'home'): void {
   })
 
   mainWindow.setMenu(null)
-  loadRenderer(mainWindow, false, 'region', mainView)
+  if (showWelcome && mainView === 'home') void mainWindow.loadFile(join(__dirname, '../../build/welcome.html'))
+  else loadRenderer(mainWindow, false, 'region', mainView)
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://www.gestaoculturalpro.com.br')) {
       void shell.openExternal(url)
@@ -351,15 +356,16 @@ function closeColorToast(): void {
   colorToastWindow = null
 }
 
-function showColorToast(hex: string): void {
+function showColorToast(hex: string, destination: 'colors' | 'studio' = 'colors'): void {
   closeColorToast()
   if (!settings.showNotifications) return
+  toastDestination = destination
   const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
   const window = new BrowserWindow({
     x: area.x + area.width - 382, y: area.y + area.height - 164,
     width: 366, height: 146, frame: false, show: false, resizable: false,
     alwaysOnTop: true, skipTaskbar: true, backgroundColor: '#151923',
-    title: 'GCPShot - Cor copiada', icon: getAppIcon(),
+    title: destination === 'studio' ? 'GCPShot - Captura copiada' : 'GCPShot - Cor copiada', icon: getAppIcon(),
     webPreferences: { preload: join(__dirname, '../preload/index.js'), contextIsolation: true, nodeIntegration: false, sandbox: false }
   })
   colorToastWindow = window
@@ -370,7 +376,7 @@ function showColorToast(hex: string): void {
     colorToastTimer = setTimeout(closeColorToast, 12000)
   })
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-  void window.loadFile(join(__dirname, '../../build/color-toast.html'), { query: { hex } })
+  void window.loadFile(join(__dirname, '../../build/color-toast.html'), { query: { hex, destination } })
 }
 
 function createTray(): void {
@@ -391,15 +397,17 @@ function createTray(): void {
   tray.setToolTip('GCPShot')
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: 'Capturar região', click: () => void beginCapture('region') },
-      { label: 'Capturar tela inteira', click: () => void beginCapture('fullscreen') },
-      { label: 'Abrir o Estúdio', click: openStudioWindow },
-      { label: 'Color Lab', click: () => openColorWindow('colors') },
-      { label: 'Minhas Paletas', click: () => openColorWindow('palettes') },
-      { label: 'Live Color', accelerator: settings.liveColorShortcut, click: () => void beginLiveColor().then((result) => { if (result.error) notify('Live Color', result.error) }) },
+      { label: 'Capturar região', icon: trayMenuIcon('region'), click: () => void beginCapture('region') },
+      { label: 'Capturar tela inteira', icon: trayMenuIcon('fullscreen'), click: () => void beginCapture('fullscreen') },
+      { type: 'separator' },
+      { label: 'Abrir o Estúdio', icon: trayMenuIcon('studio'), click: openStudioWindow },
+      { label: 'Color Lab', icon: trayMenuIcon('colors'), click: () => openColorWindow('colors') },
+      { label: 'Minhas Paletas', icon: trayMenuIcon('palettes'), click: () => openColorWindow('palettes') },
+      { label: 'Live Color', icon: trayMenuIcon('live'), accelerator: settings.liveColorShortcut, click: () => void beginLiveColor().then((result) => { if (result.error) notify('Live Color', result.error) }) },
       { type: 'separator' },
       {
         label: process.platform === 'win32' ? 'Iniciar com o Windows' : 'Iniciar com o sistema',
+        icon: trayMenuIcon('startup'),
         type: 'checkbox',
         checked: settings.startWithWindows,
         click: (item) => {
@@ -409,6 +417,7 @@ function createTray(): void {
       { type: 'separator' },
       {
         label: 'Sair',
+        icon: trayMenuIcon('quit'),
         click: () => {
           isQuitting = true
           app.quit()
@@ -416,7 +425,11 @@ function createTray(): void {
       }
     ])
   )
-  tray.on('double-click', openStudioWindow)
+  tray.on('click', () => tray?.popUpContextMenu())
+}
+
+function trayMenuIcon(name: string): Electron.NativeImage {
+  return nativeImage.createFromPath(join(__dirname, '../../build/tray', `${name}-${nativeTheme.shouldUseDarkColors ? 'light' : 'dark'}.png`)).resize({ width: 16, height: 16 })
 }
 
 function cropThumbnailToWorkArea(thumbnail: Electron.NativeImage, display: Electron.Display): Electron.NativeImage {
@@ -436,8 +449,9 @@ function cropThumbnailToWorkArea(thumbnail: Electron.NativeImage, display: Elect
   return thumbnail.crop(cropRect)
 }
 
-async function beginOverlay(mode: CaptureMode, overlay: 'capture' | 'record'): Promise<CaptureResult> {
+async function beginOverlay(mode: CaptureMode, overlay: 'capture' | 'record', autoCopy = false): Promise<CaptureResult> {
   if (colorPickerProcess) return { ok: false, error: 'Conclua o Live Color ou pressione Esc antes de capturar.' }
+  closeColorToast()
   if (captureWindows.length > 0) {
     captureWindows[0]?.focus()
     return { ok: true }
@@ -528,6 +542,7 @@ async function beginOverlay(mode: CaptureMode, overlay: 'capture' | 'record'): P
     window.webContents.send('capture:image', {
       dataUrl: '',
       mode,
+      autoCopy,
       segments,
       virtualDesktop: {
         width: desktopWidth,
@@ -555,8 +570,8 @@ async function beginOverlay(mode: CaptureMode, overlay: 'capture' | 'record'): P
   return { ok: true }
 }
 
-async function beginCapture(mode: CaptureMode = 'region'): Promise<CaptureResult> {
-  return beginOverlay(mode, 'capture')
+async function beginCapture(mode: CaptureMode = 'region', autoCopy = false): Promise<CaptureResult> {
+  return beginOverlay(mode, 'capture', autoCopy)
 }
 
 async function beginRecord(mode: RecordMode = 'region'): Promise<CaptureResult> {
@@ -606,15 +621,24 @@ function closeCaptureWindow(): void {
 }
 
 function registerIpc(): void {
+  ipcMain.handle('app:welcome-finish', async (event, view: MainView) => {
+    if (event.sender !== mainWindow?.webContents || !['home', 'studio', 'colors'].includes(view)) return
+    await writeFile(join(app.getPath('userData'), 'welcome-version.txt'), app.getVersion(), 'utf8')
+    showWelcome = false
+    if (mainWindow) loadRenderer(mainWindow, false, 'region', view)
+  })
   ipcMain.on('colors:toast-open', (event) => {
     if (event.sender !== colorToastWindow?.webContents) return
     closeColorToast()
-    openColorWindow('colors')
+    if (toastDestination === 'studio') openStudioWindow()
+    else openColorWindow('colors')
   })
   ipcMain.on('colors:toast-dismiss', (event) => {
     if (event.sender === colorToastWindow?.webContents) closeColorToast()
   })
   ipcMain.handle('colors:get', () => getColorLibrary())
+  ipcMain.handle('studio:captures', () => getStoredCaptures())
+  ipcMain.handle('studio:remove-capture', (_event, id: string) => removeStoredCapture(id))
   ipcMain.handle('colors:save', (_event, input: unknown) => saveColorLibrary(input))
   ipcMain.handle('colors:pick', () => beginLiveColor())
   ipcMain.handle('colors:copy', (_event, value: string) => {
@@ -638,7 +662,7 @@ function registerIpc(): void {
     await writeFile(result.filePath, content, 'utf8')
     return true
   })
-  ipcMain.handle('capture:begin', (_event, mode: CaptureMode = 'region') => beginCapture(mode))
+  ipcMain.handle('capture:begin', (_event, mode: CaptureMode = 'region', autoCopy = false) => beginCapture(mode, autoCopy === true))
   ipcMain.handle('record:begin', (_event, mode: RecordMode = 'region') => beginRecord(mode))
   ipcMain.handle('record:cancel', () => {
     closeCaptureWindow()
@@ -675,13 +699,13 @@ function registerIpc(): void {
   })
   ipcMain.handle(
     'capture:copy',
-    (_event, payload: CaptureExportPayload): CaptureResult => {
+    async (_event, payload: CaptureExportPayload): Promise<CaptureResult> => {
       const image = imageFromExportPayload(payload)
+      if (image.isEmpty()) return { ok: false, error: 'Nao foi possivel compor a captura.' }
+      await storeCapture(image)
       clipboard.writeImage(image)
-      notify('Captura copiada', 'A imagem está na área de transferência.')
-      if (!settings.keepSelectionAfterAction) {
-        closeCaptureWindow()
-      }
+      closeCaptureWindow()
+      showColorToast('', 'studio')
       return { ok: true }
     }
   )
@@ -923,7 +947,7 @@ function registerShortcuts(): void {
   if (!registered) notify('Atalho Live Color indisponivel', 'Escolha outro atalho nas configuracoes; essa combinacao esta em uso.')
 
   if (settings.printScreenShortcut) {
-    globalShortcut.register('PrintScreen', startRegion)
+    globalShortcut.register('PrintScreen', () => void beginCapture('region', true))
   }
 }
 
@@ -940,6 +964,7 @@ async function updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>
 app.whenReady().then(async () => {
   app.setName('GCPShot')
   settings = await loadSettings()
+  showWelcome = await readFile(join(app.getPath('userData'), 'welcome-version.txt'), 'utf8').then((version) => version !== app.getVersion()).catch(() => true)
   await loadColorLibrary()
 
   if (process.platform === 'win32') {
@@ -949,6 +974,7 @@ app.whenReady().then(async () => {
   applyLoginItemSettings()
   registerIpc()
   createTray()
+  nativeTheme.on('updated', createTray)
 
   if (!shouldStartHidden()) {
     createMainWindow()

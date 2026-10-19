@@ -37,7 +37,7 @@ export function loadStudioLibrary(): StudioImage[] {
 
 export function saveStudioLibrary(items: StudioImage[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(items.slice(0, MAX_ITEMS)))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(items.filter((item) => !item.id.startsWith('capture-')).slice(0, MAX_ITEMS)))
   } catch {
     // Ignore quota errors to avoid crashing the renderer while editing.
   }

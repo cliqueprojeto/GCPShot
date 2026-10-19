@@ -20,6 +20,7 @@ export type CaptureSegment = {
 }
 
 export type CaptureImagePayload = {
+  autoCopy?: boolean
   dataUrl: string
   mode: CaptureMode
   segments: CaptureSegment[]

@@ -1,4 +1,4 @@
-# GCPShot 0.4.2
+# GCPShot 0.5.0
 
 ## macOS 14 ou posterior
 
@@ -18,7 +18,7 @@ Abra o arquivo .deb pelo instalador de aplicativos da distribuicao.
 Tambem pode instalar na pasta do arquivo com:
 
 ```sh
-sudo apt install ./GCPShot-0.4.2-Linux-amd64.deb
+sudo apt install ./GCPShot-0.5.0-Linux-amd64.deb
 ```
 
 O pacote instala as dependencias e cria a entrada GCPShot no menu de aplicativos.

@@ -1,6 +1,6 @@
 {
   "name": "gcpshot",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "GCPShot - captura de tela premium da Gestão Cultural Pro.",
   "main": "out/main/index.js",
   "author": "Gestão Cultural Pro",
@@ -8,6 +8,7 @@
   "private": true,
   "scripts": {
     "test": "node scripts/test-colors.cjs",
+    "build:brand": "node scripts/build-brand-assets.cjs",
     "dev": "electron-vite dev",
     "typecheck": "tsc --noEmit",
     "build": "node scripts/build-live-picker.cjs && npm run typecheck && electron-vite build",
@@ -28,7 +29,13 @@
       "package.json"
     ],
     "win": {
-      "extraResources": [{ "from": "build/GCPShot.LiveColor.exe", "to": "GCPShot.LiveColor.exe" }],
+      "artifactName": "GCPShot-${version}-Windows-x64.${ext}",
+      "extraResources": [
+        {
+          "from": "build/GCPShot.LiveColor.exe",
+          "to": "GCPShot.LiveColor.exe"
+        }
+      ],
       "icon": "build/icon.ico",
       "target": [
         {
@@ -44,12 +51,19 @@
       "icon": "build/icon.png",
       "category": "public.app-category.graphics-design",
       "minimumSystemVersion": "14.0",
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "artifactName": "GCPShot-${version}-macOS-${arch}.${ext}",
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "extraResources": [{ "from": "build/GCPShot.LiveColor", "to": "GCPShot.LiveColor" }],
+      "extraResources": [
+        {
+          "from": "build/GCPShot.LiveColor",
+          "to": "GCPShot.LiveColor"
+        }
+      ],
       "extendInfo": {
         "NSScreenCaptureUsageDescription": "GCPShot precisa acessar a tela para capturas e selecao de cores.",
         "NSMicrophoneUsageDescription": "GCPShot usa o microfone quando voce habilita audio nas gravacoes.",
@@ -59,13 +73,33 @@
     "linux": {
       "icon": "build/icon.png",
       "category": "Graphics",
-      "target": ["deb"],
+      "target": [
+        "deb"
+      ],
       "artifactName": "GCPShot-${version}-Linux-${arch}.${ext}",
       "maintainer": "Gestao Cultural Pro <contato@gestaoculturalpro.com.br>",
-      "extraResources": [{ "from": "build/GCPShot.LiveColor", "to": "GCPShot.LiveColor" }]
+      "extraResources": [
+        {
+          "from": "build/GCPShot.LiveColor",
+          "to": "GCPShot.LiveColor"
+        }
+      ]
+    },
+    "dmg": {
+      "background": "build/dmg-background.png",
+      "window": { "width": 660, "height": 420 },
+      "iconSize": 108,
+      "iconTextSize": 13,
+      "contents": [
+        { "x": 180, "y": 240, "type": "file" },
+        { "x": 480, "y": 240, "type": "link", "path": "/Applications" }
+      ]
     },
     "nsis": {
       "installerIcon": "build/icon.ico",
+      "installerHeader": "build/installerHeader.bmp",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallerSidebar": "build/installerSidebar.bmp",
       "uninstallerIcon": "build/icon.ico",
       "include": "build/installer.nsh",
       "oneClick": false,
@@ -76,6 +110,7 @@
     }
   },
   "dependencies": {
+    "lucide-react": "^1.59.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
@@ -88,6 +123,7 @@
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "png-to-ico": "^3.0.1",
+    "sharp": "^0.35.5",
     "typescript": "^6.0.3",
     "vite": "^7.3.6"
   }

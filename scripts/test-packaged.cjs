@@ -4,7 +4,7 @@ const { resolve } = require('node:path')
 ;(async () => {
   const executablePath = process.platform === 'darwin'
     ? resolve(process.arch === 'arm64' ? 'release/mac-arm64/GCPShot.app/Contents/MacOS/GCPShot' : 'release/mac/GCPShot.app/Contents/MacOS/GCPShot')
-    : '/opt/GCPShot/gcpshot'
+    : process.platform === 'win32' ? resolve('release/win-unpacked/GCPShot.exe') : '/opt/GCPShot/gcpshot'
   const app = await electron.launch({ executablePath, args: [], timeout: 30000 })
   try {
     const page = await app.firstWindow()
@@ -22,6 +22,7 @@ const { resolve } = require('node:path')
     await page.getByRole('button', { name: 'Salvar paleta', exact: true }).click()
     await page.getByRole('heading', { name: 'Teste do instalador', exact: true }).waitFor()
     assert.equal((await page.evaluate(() => window.gcpshot.getColorLibrary())).palettes[0].colors.length, 5)
+    await require('./test-capture-flow.cjs')(app, page)
     assert.deepEqual(errors, [])
     console.log(`Packaged ${process.platform}/${process.arch} app: launch, Color Lab, clipboard and palette persistence passed.`)
   } finally { await app.evaluate(({ app }) => app.quit()).catch(() => {}); await app.close().catch(() => {}) }

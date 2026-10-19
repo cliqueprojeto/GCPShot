@@ -2,8 +2,12 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { AppSettings, CaptureExportPayload, CaptureImagePayload, CaptureMode, CaptureResult, RecordMode } from '../shared/capture'
 import type { StudioPickResult, StudioVideoPickResult } from '../shared/studio'
 import type { ColorLibrary, ColorResult } from '../shared/colors'
+import type { StoredCapture } from '../shared/studio'
 
 const api = {
+  finishWelcome: (view: 'home' | 'studio' | 'colors'): Promise<void> => ipcRenderer.invoke('app:welcome-finish', view),
+  getStoredCaptures: (): Promise<StoredCapture[]> => ipcRenderer.invoke('studio:captures'),
+  removeStoredCapture: (id: string): Promise<void> => ipcRenderer.invoke('studio:remove-capture', id),
   openColorLabFromToast: (): void => ipcRenderer.send('colors:toast-open'),
   dismissColorToast: (): void => ipcRenderer.send('colors:toast-dismiss'),
   getColorLibrary: (): Promise<ColorLibrary> => ipcRenderer.invoke('colors:get'),
@@ -22,7 +26,7 @@ const api = {
     ipcRenderer.on('colors:picked', listener)
     return () => ipcRenderer.removeListener('colors:picked', listener)
   },
-  beginCapture: (mode: CaptureMode = 'region'): Promise<CaptureResult> => ipcRenderer.invoke('capture:begin', mode),
+  beginCapture: (mode: CaptureMode = 'region', autoCopy = false): Promise<CaptureResult> => ipcRenderer.invoke('capture:begin', mode, autoCopy),
   beginRecord: (mode: RecordMode = 'region'): Promise<CaptureResult> => ipcRenderer.invoke('record:begin', mode),
   cancelCapture: (): Promise<void> => ipcRenderer.invoke('capture:cancel'),
   cancelRecord: (): Promise<void> => ipcRenderer.invoke('record:cancel'),

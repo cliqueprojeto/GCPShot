@@ -5,6 +5,8 @@ export type StudioImportFile = {
   height: number
 }
 
+export type StoredCapture = StudioImportFile & { id: string; createdAt: number }
+
 export type StudioPickResult = {
   ok: boolean
   files: StudioImportFile[]
