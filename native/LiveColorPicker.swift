@@ -20,6 +20,7 @@ final class MagnifierView: NSView {
     var image: CGImage?
     var hex = "#000000"
     var channels = [0, 0, 0]
+    var samplePoint = NSPoint(x: 13, y: 6)
     override var isFlipped: Bool { true }
     override func draw(_ rect: NSRect) {
         NSColor(calibratedRed: 0.067, green: 0.082, blue: 0.118, alpha: 1).setFill()
@@ -31,7 +32,7 @@ final class MagnifierView: NSView {
         let border = NSColor(calibratedRed: 0.61, green: 0.63, blue: 1, alpha: 1)
         border.setStroke()
         NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5)).stroke()
-        NSBezierPath(rect: NSRect(x: 129, y: 66, width: 8, height: 8)).stroke()
+        NSBezierPath(rect: NSRect(x: 12 + samplePoint.x * 9, y: 12 + samplePoint.y * 9, width: 8, height: 8)).stroke()
         let base: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.white]
         ("\(hex)   rgb(\(channels[0]), \(channels[1]), \(channels[2]))" as NSString).draw(at: NSPoint(x: 11, y: 137), withAttributes: base)
         let muted: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor(calibratedRed: 0.64, green: 0.71, blue: 0.89, alpha: 1)]
@@ -96,20 +97,23 @@ final class MagnifierView: NSView {
               let display = content.displays.first(where: { $0.frame.contains(position) }) else { return false }
         let filter = SCContentFilter(display: display, excludingApplications: content.applications.filter { $0.processID == ProcessInfo.processInfo.processIdentifier }, exceptingWindows: [])
         let config = SCStreamConfiguration()
-        let px = max(0, min(position.x - display.frame.minX - 13, display.frame.width - 27))
-        let py = max(0, min(position.y - display.frame.minY - 6, display.frame.height - 13))
-        config.sourceRect = CGRect(x: px, y: py, width: 27, height: 13)
+        let scale = CGFloat(display.width) / display.frame.width
+        let width = 27 / scale, height = 13 / scale
+        let px = max(0, min(position.x - display.frame.minX - 13 / scale, display.frame.width - width))
+        let py = max(0, min(position.y - display.frame.minY - 6 / scale, display.frame.height - height))
+        config.sourceRect = CGRect(x: px, y: py, width: width, height: height)
         config.width = 27; config.height = 13
         config.showsCursor = false
         do {
             let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
             if finished { return false }
             let bitmap = NSBitmapImageRep(cgImage: image)
-            let sampleX = max(0, min(26, Int(position.x - display.frame.minX - px)))
-            let sampleY = max(0, min(12, Int(position.y - display.frame.minY - py)))
+            let sampleX = max(0, min(26, Int((position.x - display.frame.minX - px) * scale)))
+            let sampleY = max(0, min(12, Int((position.y - display.frame.minY - py) * scale)))
             guard let color = bitmap.colorAt(x: sampleX, y: sampleY)?.usingColorSpace(.sRGB) else { return false }
             let values = [color.redComponent, color.greenComponent, color.blueComponent].map { Int(($0 * 255).rounded()) }
             preview.channels = values
+            preview.samplePoint = NSPoint(x: sampleX, y: sampleY)
             preview.hex = String(format: "#%02X%02X%02X", values[0], values[1], values[2])
             preview.image = image
             preview.needsDisplay = true
@@ -138,8 +142,10 @@ final class MagnifierView: NSView {
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 if #available(macOS 14.0, *) {
-    let picker = Picker()
-    Task { await picker.start() }
+    Task { @MainActor in
+        let picker = Picker()
+        await picker.start()
+    }
     app.run()
 } else {
     FileHandle.standardError.write(Data("Live Color requer macOS 14 ou posterior.\n".utf8))
