@@ -113,6 +113,7 @@ export type AppSettings = {
   captureShortcut: string
   fullscreenShortcut: string
   studioShortcut: string
+  liveColorShortcut: string
   recordRegionShortcut: string
   recordFullscreenShortcut: string
   recordPauseShortcut: string
@@ -161,6 +162,7 @@ export type SettingsShortcutKey = keyof Pick<
   | 'captureShortcut'
   | 'fullscreenShortcut'
   | 'studioShortcut'
+  | 'liveColorShortcut'
   | 'recordRegionShortcut'
   | 'recordFullscreenShortcut'
   | 'recordPauseShortcut'
@@ -200,6 +202,7 @@ export const defaultAppSettings: AppSettings = {
   captureShortcut: 'Alt+Shift+S',
   fullscreenShortcut: 'Alt+Shift+F',
   studioShortcut: 'Alt+Shift+E',
+  liveColorShortcut: 'Ctrl+Shift+C',
   recordRegionShortcut: 'Alt+Shift+R',
   recordFullscreenShortcut: 'Alt+Shift+V',
   recordPauseShortcut: 'Alt+Shift+P',

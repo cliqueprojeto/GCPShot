@@ -17,6 +17,7 @@ import logoGcp from './assets/logo-gcp.png'
 import { ContributionPanel, GCP_SITE_URL } from './ContributionPanel'
 import { LandingButton } from './LandingButton'
 import { Studio } from './Studio'
+import { ColorLab } from './ColorLab'
 import { pushCaptureToStudioAsync } from './studioStorage'
 import {
   clampToolbarPosition,
@@ -48,6 +49,7 @@ type SelectionAdjustState = {
 
 const isCaptureMode = new URLSearchParams(window.location.search).get('capture') === '1'
 const isStudioMode = new URLSearchParams(window.location.search).get('studio') === '1'
+const initialColorView = new URLSearchParams(window.location.search).has('palettes') ? 'palettes' : new URLSearchParams(window.location.search).has('colors') ? 'colors' : null
 const initialCaptureMode = (new URLSearchParams(window.location.search).get('mode') ?? 'region') as CaptureMode
 const palettes = {
   GCP: ['#7b2ff7', '#d94cff', '#ffcf70', '#ffffff', '#2b0f43'],
@@ -220,7 +222,7 @@ function toolLabel(language: AppLanguage, tool: EditorTool): string {
 }
 
 function Landing(): JSX.Element {
-  const [view, setView] = useState<'home' | 'studio'>(isStudioMode ? 'studio' : 'home')
+  const [view, setView] = useState<'home' | 'studio' | 'colors' | 'palettes'>(initialColorView ?? (isStudioMode ? 'studio' : 'home'))
   const [settings, setSettings] = useState<AppSettings>(defaultAppSettings)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('general')
@@ -247,6 +249,11 @@ function Landing(): JSX.Element {
       setView('studio')
     })
   }, [])
+
+  useEffect(() => window.gcpshot.onOpenColors((next) => {
+    setSettingsOpen(false)
+    setView(next)
+  }), [])
 
   async function startCapture(mode: CaptureMode): Promise<void> {
     const result = await window.gcpshot.beginCapture(mode)
@@ -276,15 +283,15 @@ function Landing(): JSX.Element {
     setStatus(t(nextSettings.language, 'settingsReset'))
   }
 
-  if (view === 'studio') {
+  if (view === 'studio' || view === 'colors' || view === 'palettes') {
     return (
       <>
-        <Studio
+        {view === 'studio' ? <Studio
           language={language}
           settings={settings}
           onBack={() => setView('home')}
           onOpenSettings={() => setSettingsOpen(true)}
-        />
+        /> : <ColorLab view={view} shortcut={settings.liveColorShortcut} onNavigate={setView} onSettings={() => setSettingsOpen(true)} />}
         {settingsOpen && (
           <SettingsPanel
             settings={settings}
@@ -322,6 +329,8 @@ function Landing(): JSX.Element {
             </div>
           </div>
           <div className="nav-actions settings-nav-actions">
+            <button className="ghost-button" onClick={() => setView('colors')}>Color Lab</button>
+            <button className="ghost-button" onClick={() => setView('palettes')}>Minhas Paletas</button>
             <span className="settings-pointer" aria-hidden="true">
               <span className="settings-pointer-arrow" />
               <span className="settings-pointer-label">{t(language, 'settingsArrowHint')}</span>

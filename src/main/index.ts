@@ -14,11 +14,15 @@ import {
   shell
 } from 'electron'
 import { readFile, writeFile } from 'node:fs/promises'
+import { mkdirSync, writeFileSync, existsSync, unlinkSync } from 'node:fs'
 import { extname, join, basename } from 'node:path'
+import { spawn, type ChildProcess } from 'node:child_process'
 import type { AppSettings, CaptureExportPayload, CaptureMode, CaptureRect, CaptureResult, RecordMode } from '../shared/capture'
 import { defaultAppSettings } from '../shared/capture'
+import { normalizeHex, parseLibrary, type ColorResult } from '../shared/colors'
+import { getColorLibrary, loadColorLibrary, saveColorLibrary } from './colorLibrary'
 
-type MainView = 'home' | 'studio'
+type MainView = 'home' | 'studio' | 'colors' | 'palettes'
 
 let mainWindow: BrowserWindow | null = null
 let captureWindow: BrowserWindow | null = null
@@ -26,6 +30,9 @@ let captureWindows: BrowserWindow[] = []
 let tray: Tray | null = null
 let settings: AppSettings
 let isQuitting = false
+let colorPickerProcess: ChildProcess | null = null
+let colorToastWindow: BrowserWindow | null = null
+let colorToastTimer: ReturnType<typeof setTimeout> | null = null
 
 const isDev = Boolean(process.env.ELECTRON_RENDERER_URL)
 const settingsPath = (): string => join(app.getPath('userData'), 'settings.json')
@@ -35,6 +42,7 @@ const shortcutKeys: Array<keyof AppSettings> = [
   'captureShortcut',
   'fullscreenShortcut',
   'studioShortcut',
+  'liveColorShortcut',
   'recordRegionShortcut',
   'recordFullscreenShortcut',
   'recordPauseShortcut',
@@ -91,6 +99,16 @@ async function saveSettings(nextSettings: AppSettings): Promise<void> {
 }
 
 function applyLoginItemSettings(): void {
+  if (process.platform === 'linux') {
+    const directory = join(app.getPath('appData'), 'autostart')
+    const path = join(directory, 'gcpshot.desktop')
+    if (settings.startWithWindows) {
+      mkdirSync(directory, { recursive: true })
+      const executable = process.execPath.replace(/([\\"`$])/g, '\\$1').replace(/%/g, '%%')
+      writeFileSync(path, `[Desktop Entry]\nType=Application\nName=GCPShot\nExec="${executable}" --hidden\nTerminal=false\nX-GNOME-Autostart-enabled=true\n`)
+    } else if (existsSync(path)) unlinkSync(path)
+    return
+  }
   app.setLoginItemSettings({
     openAtLogin: settings.startWithWindows,
     openAsHidden: settings.startWithWindows,
@@ -120,7 +138,7 @@ function notify(title: string, body: string): void {
 }
 
 function getAppIcon(): Electron.NativeImage {
-  const icon = nativeImage.createFromPath(join(__dirname, '../../build/icon.ico'))
+  const icon = nativeImage.createFromPath(join(__dirname, process.platform === 'win32' ? '../../build/icon.ico' : '../../build/icon.png'))
 
   if (!icon.isEmpty()) {
     return icon
@@ -156,8 +174,8 @@ function loadRenderer(
     if (overlay) {
       url.searchParams.set(overlay === 'record' ? 'record' : 'capture', '1')
       url.searchParams.set('mode', mode)
-    } else if (mainView === 'studio') {
-      url.searchParams.set('studio', '1')
+    } else if (mainView !== 'home') {
+      url.searchParams.set(mainView, '1')
     }
 
     window.loadURL(url.toString())
@@ -167,8 +185,8 @@ function loadRenderer(
   window.loadFile(join(__dirname, '../renderer/index.html'), {
     query: overlay
       ? { [overlay === 'record' ? 'record' : 'capture']: '1', mode }
-      : mainView === 'studio'
-        ? { studio: '1' }
+      : mainView !== 'home'
+        ? { [mainView]: '1' }
         : undefined
   })
 }
@@ -273,6 +291,87 @@ function openSettingsWindow(): void {
   mainWindow.webContents.send('settings:open')
 }
 
+function openColorWindow(view: 'colors' | 'palettes' = 'colors'): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createMainWindow(view)
+    return
+  }
+  const window = mainWindow
+  if (window.isMinimized()) window.restore()
+  window.show()
+  window.focus()
+  const send = (): void => window.webContents.send('colors:open', view)
+  if (window.webContents.isLoading()) window.webContents.once('did-finish-load', send)
+  else send()
+}
+
+async function beginLiveColor(): Promise<ColorResult> {
+  if (captureWindows.length) return { ok: false, error: 'Conclua a captura antes de iniciar o Live Color.' }
+  if (colorPickerProcess) return { ok: false, error: 'O Live Color ja esta ativo.' }
+  const wasVisible = Boolean(mainWindow?.isVisible())
+  try {
+    closeColorToast()
+    mainWindow?.hide()
+    const helper = process.platform === 'win32' ? 'GCPShot.LiveColor.exe' : 'GCPShot.LiveColor'
+    const executable = app.isPackaged ? join(process.resourcesPath, helper) : join(__dirname, '../../build', helper)
+    const value = await new Promise<string | null>((resolve, reject) => {
+      const child = spawn(executable, [String(process.pid)], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...(process.platform === 'linux' ? { GDK_SCALE: '1', GDK_DPI_SCALE: '1' } : {}) } })
+      colorPickerProcess = child
+      let output = '', error = ''
+      child.stdout?.on('data', (chunk: Buffer) => { output = (output + chunk.toString()).slice(-4096) })
+      child.stderr?.on('data', (chunk: Buffer) => { error = (error + chunk.toString()).slice(-4096) })
+      child.once('error', reject)
+      child.once('close', (code) => {
+        if (isQuitting) { resolve(null); return }
+        if (code !== 0) { reject(new Error(error.trim() || 'Nao foi possivel iniciar o Live Color.')); return }
+        resolve(output.split(/\r?\n/).find((line) => /^#[0-9A-F]{6}$/.test(line)) ?? null)
+      })
+    })
+    const hex = value ? normalizeHex(value) : null
+    if (!hex) return { ok: false }
+    clipboard.writeText(hex)
+    const current = getColorLibrary()
+    await saveColorLibrary({ ...current, history: [hex, ...current.history.filter((c) => c !== hex)].slice(0, 100) })
+    mainWindow?.webContents.send('colors:picked', hex)
+    showColorToast(hex)
+    return { ok: true, hex }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Falha ao selecionar cor.' }
+  } finally {
+    colorPickerProcess = null
+    if (!isQuitting && wasVisible && mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus() }
+  }
+}
+
+function closeColorToast(): void {
+  if (colorToastTimer) clearTimeout(colorToastTimer)
+  colorToastTimer = null
+  if (colorToastWindow && !colorToastWindow.isDestroyed()) colorToastWindow.destroy()
+  colorToastWindow = null
+}
+
+function showColorToast(hex: string): void {
+  closeColorToast()
+  if (!settings.showNotifications) return
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
+  const window = new BrowserWindow({
+    x: area.x + area.width - 382, y: area.y + area.height - 164,
+    width: 366, height: 146, frame: false, show: false, resizable: false,
+    alwaysOnTop: true, skipTaskbar: true, backgroundColor: '#151923',
+    title: 'GCPShot - Cor copiada', icon: getAppIcon(),
+    webPreferences: { preload: join(__dirname, '../preload/index.js'), contextIsolation: true, nodeIntegration: false, sandbox: false }
+  })
+  colorToastWindow = window
+  window.setMenu(null)
+  window.once('ready-to-show', () => {
+    if (window.isDestroyed()) return
+    window.showInactive()
+    colorToastTimer = setTimeout(closeColorToast, 12000)
+  })
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  void window.loadFile(join(__dirname, '../../build/color-toast.html'), { query: { hex } })
+}
+
 function createTray(): void {
   if (tray) {
     tray.destroy()
@@ -294,9 +393,12 @@ function createTray(): void {
       { label: 'Capturar região', click: () => void beginCapture('region') },
       { label: 'Capturar tela inteira', click: () => void beginCapture('fullscreen') },
       { label: 'Abrir o Estúdio', click: openStudioWindow },
+      { label: 'Color Lab', click: () => openColorWindow('colors') },
+      { label: 'Minhas Paletas', click: () => openColorWindow('palettes') },
+      { label: 'Live Color', accelerator: settings.liveColorShortcut, click: () => void beginLiveColor().then((result) => { if (result.error) notify('Live Color', result.error) }) },
       { type: 'separator' },
       {
-        label: 'Iniciar com o Windows',
+        label: process.platform === 'win32' ? 'Iniciar com o Windows' : 'Iniciar com o sistema',
         type: 'checkbox',
         checked: settings.startWithWindows,
         click: (item) => {
@@ -334,6 +436,7 @@ function cropThumbnailToWorkArea(thumbnail: Electron.NativeImage, display: Elect
 }
 
 async function beginOverlay(mode: CaptureMode, overlay: 'capture' | 'record'): Promise<CaptureResult> {
+  if (colorPickerProcess) return { ok: false, error: 'Conclua o Live Color ou pressione Esc antes de capturar.' }
   if (captureWindows.length > 0) {
     captureWindows[0]?.focus()
     return { ok: true }
@@ -502,6 +605,38 @@ function closeCaptureWindow(): void {
 }
 
 function registerIpc(): void {
+  ipcMain.on('colors:toast-open', (event) => {
+    if (event.sender !== colorToastWindow?.webContents) return
+    closeColorToast()
+    openColorWindow('colors')
+  })
+  ipcMain.on('colors:toast-dismiss', (event) => {
+    if (event.sender === colorToastWindow?.webContents) closeColorToast()
+  })
+  ipcMain.handle('colors:get', () => getColorLibrary())
+  ipcMain.handle('colors:save', (_event, input: unknown) => saveColorLibrary(input))
+  ipcMain.handle('colors:pick', () => beginLiveColor())
+  ipcMain.handle('colors:copy', (_event, value: string) => {
+    if (typeof value === 'string' && value.length < 100000) clipboard.writeText(value)
+  })
+  ipcMain.handle('colors:import', async () => {
+    const options: Electron.OpenDialogOptions = { title: 'Importar paletas', filters: [{ name: 'Paletas JSON', extensions: ['json'] }], properties: ['openFile'] }
+    const result = await (mainWindow ? dialog.showOpenDialog(mainWindow, options) : dialog.showOpenDialog(options))
+    if (result.canceled || !result.filePaths[0]) return null
+    const incoming = parseLibrary(JSON.parse(await readFile(result.filePaths[0], 'utf8')))
+    const current = getColorLibrary()
+    return saveColorLibrary({ palettes: [...current.palettes, ...incoming.palettes.map((p) => ({ ...p, id: crypto.randomUUID() }))], history: [...new Set([...current.history, ...incoming.history])] })
+  })
+  ipcMain.handle('colors:export', async (_event, format: 'json' | 'css') => {
+    if (format !== 'json' && format !== 'css') throw new Error('Formato invalido.')
+    const options: Electron.SaveDialogOptions = { title: 'Exportar paletas', defaultPath: `GCPShot-Paletas.${format}`, filters: [{ name: format.toUpperCase(), extensions: [format] }] }
+    const result = await (mainWindow ? dialog.showSaveDialog(mainWindow, options) : dialog.showSaveDialog(options))
+    if (result.canceled || !result.filePath) return false
+    const library = getColorLibrary()
+    const content = format === 'json' ? JSON.stringify(library, null, 2) : ':root {\n' + library.palettes.flatMap((p, i) => p.colors.map((c, j) => `  --paleta-${i + 1}-cor-${j + 1}: ${c};`)).join('\n') + '\n}\n'
+    await writeFile(result.filePath, content, 'utf8')
+    return true
+  })
   ipcMain.handle('capture:begin', (_event, mode: CaptureMode = 'region') => beginCapture(mode))
   ipcMain.handle('record:begin', (_event, mode: RecordMode = 'region') => beginRecord(mode))
   ipcMain.handle('record:cancel', () => {
@@ -782,6 +917,9 @@ function registerShortcuts(): void {
 
   globalShortcut.register(settings.captureShortcut, startRegion)
   globalShortcut.register(settings.fullscreenShortcut, startFullscreen)
+  globalShortcut.register(settings.studioShortcut, openStudioWindow)
+  const registered = globalShortcut.register(settings.liveColorShortcut, () => void beginLiveColor().then((result) => { if (result.error) notify('Live Color', result.error) }))
+  if (!registered) notify('Atalho Live Color indisponivel', 'Escolha outro atalho nas configuracoes; essa combinacao esta em uso.')
 
   if (settings.printScreenShortcut) {
     globalShortcut.register('PrintScreen', startRegion)
@@ -799,7 +937,9 @@ async function updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>
 }
 
 app.whenReady().then(async () => {
+  app.setName('GCPShot')
   settings = await loadSettings()
+  await loadColorLibrary()
 
   if (process.platform === 'win32') {
     app.setAppUserModelId('br.com.gestaoculturalpro.gcpshot')
@@ -824,6 +964,8 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  colorPickerProcess?.kill()
+  closeColorToast()
 })
 
 app.on('window-all-closed', () => {

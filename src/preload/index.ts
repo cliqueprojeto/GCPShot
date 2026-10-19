@@ -1,8 +1,27 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AppSettings, CaptureExportPayload, CaptureImagePayload, CaptureMode, CaptureResult, RecordMode } from '../shared/capture'
 import type { StudioPickResult, StudioVideoPickResult } from '../shared/studio'
+import type { ColorLibrary, ColorResult } from '../shared/colors'
 
 const api = {
+  openColorLabFromToast: (): void => ipcRenderer.send('colors:toast-open'),
+  dismissColorToast: (): void => ipcRenderer.send('colors:toast-dismiss'),
+  getColorLibrary: (): Promise<ColorLibrary> => ipcRenderer.invoke('colors:get'),
+  saveColorLibrary: (library: ColorLibrary): Promise<ColorLibrary> => ipcRenderer.invoke('colors:save', library),
+  pickColor: (): Promise<ColorResult> => ipcRenderer.invoke('colors:pick'),
+  copyColorText: (value: string): Promise<void> => ipcRenderer.invoke('colors:copy', value),
+  importColorLibrary: (): Promise<ColorLibrary | null> => ipcRenderer.invoke('colors:import'),
+  exportColorLibrary: (format: 'json' | 'css'): Promise<boolean> => ipcRenderer.invoke('colors:export', format),
+  onOpenColors: (callback: (view: 'colors' | 'palettes') => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, view: 'colors' | 'palettes'): void => callback(view)
+    ipcRenderer.on('colors:open', listener)
+    return () => ipcRenderer.removeListener('colors:open', listener)
+  },
+  onColorPicked: (callback: (hex: string) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, hex: string): void => callback(hex)
+    ipcRenderer.on('colors:picked', listener)
+    return () => ipcRenderer.removeListener('colors:picked', listener)
+  },
   beginCapture: (mode: CaptureMode = 'region'): Promise<CaptureResult> => ipcRenderer.invoke('capture:begin', mode),
   beginRecord: (mode: RecordMode = 'region'): Promise<CaptureResult> => ipcRenderer.invoke('record:begin', mode),
   cancelCapture: (): Promise<void> => ipcRenderer.invoke('capture:cancel'),

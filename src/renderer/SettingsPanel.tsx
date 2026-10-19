@@ -19,6 +19,7 @@ const shortcutFields: ShortcutField[] = [
   { key: 'captureShortcut', labelKey: 'shortcutCapture', icon: 'select' },
   { key: 'fullscreenShortcut', labelKey: 'shortcutFullscreen', icon: 'select' },
   { key: 'studioShortcut', labelKey: 'shortcutStudio', icon: 'select' },
+  { key: 'liveColorShortcut', labelKey: 'shortcutLiveColor', icon: 'magnifier' },
   { key: 'selectShortcut', labelKey: 'shortcutSelect', icon: 'select' },
   { key: 'moveShortcut', labelKey: 'shortcutMove', icon: 'move' },
   { key: 'penShortcut', labelKey: 'shortcutPen', icon: 'pen' },

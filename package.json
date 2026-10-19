@@ -1,17 +1,20 @@
 {
   "name": "gcpshot",
-  "version": "0.3.3",
+  "version": "0.4.2",
   "description": "GCPShot - captura de tela premium da Gestão Cultural Pro.",
   "main": "out/main/index.js",
   "author": "Gestão Cultural Pro",
   "homepage": "https://www.gestaoculturalpro.com.br",
   "private": true,
   "scripts": {
+    "test": "node scripts/test-colors.cjs",
     "dev": "electron-vite dev",
     "typecheck": "tsc --noEmit",
-    "build": "npm run typecheck && electron-vite build",
+    "build": "node scripts/build-live-picker.cjs && npm run typecheck && electron-vite build",
     "start": "electron-vite preview",
-    "dist": "npm run build && electron-builder --win nsis"
+    "dist": "npm run build && electron-builder --win nsis",
+    "dist:mac": "npm run build && electron-builder --mac dmg --publish never",
+    "dist:linux": "npm run build && electron-builder --linux deb --publish never"
   },
   "build": {
     "appId": "br.com.gestaoculturalpro.gcpshot",
@@ -25,6 +28,7 @@
       "package.json"
     ],
     "win": {
+      "extraResources": [{ "from": "build/GCPShot.LiveColor.exe", "to": "GCPShot.LiveColor.exe" }],
       "icon": "build/icon.ico",
       "target": [
         {
@@ -34,6 +38,30 @@
           ]
         }
       ]
+    },
+    "mac": {
+      "icon": "build/icon.png",
+      "category": "public.app-category.graphics-design",
+      "minimumSystemVersion": "14.0",
+      "target": ["dmg"],
+      "artifactName": "GCPShot-${version}-macOS-${arch}.${ext}",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extraResources": [{ "from": "build/GCPShot.LiveColor", "to": "GCPShot.LiveColor" }],
+      "extendInfo": {
+        "NSScreenCaptureUsageDescription": "GCPShot precisa acessar a tela para capturas e selecao de cores.",
+        "NSMicrophoneUsageDescription": "GCPShot usa o microfone quando voce habilita audio nas gravacoes.",
+        "NSCameraUsageDescription": "GCPShot usa a camera quando voce habilita a webcam nas gravacoes."
+      }
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Graphics",
+      "target": ["deb"],
+      "artifactName": "GCPShot-${version}-Linux-${arch}.${ext}",
+      "maintainer": "Gestao Cultural Pro <contato@gestaoculturalpro.com.br>",
+      "extraResources": [{ "from": "build/GCPShot.LiveColor", "to": "GCPShot.LiveColor" }]
     },
     "nsis": {
       "installerIcon": "build/icon.ico",

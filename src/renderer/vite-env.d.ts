@@ -2,10 +2,21 @@
 
 import type { AppSettings, CaptureExportPayload, CaptureImagePayload, CaptureMode, CaptureResult, RecordMode } from '../shared/capture'
 import type { StudioPickResult, StudioVideoPickResult } from '../shared/studio'
+import type { ColorLibrary, ColorResult } from '../shared/colors'
 
 declare global {
   interface Window {
     gcpshot: {
+      openColorLabFromToast: () => void
+      dismissColorToast: () => void
+      getColorLibrary: () => Promise<ColorLibrary>
+      saveColorLibrary: (library: ColorLibrary) => Promise<ColorLibrary>
+      pickColor: () => Promise<ColorResult>
+      copyColorText: (value: string) => Promise<void>
+      importColorLibrary: () => Promise<ColorLibrary | null>
+      exportColorLibrary: (format: 'json' | 'css') => Promise<boolean>
+      onOpenColors: (callback: (view: 'colors' | 'palettes') => void) => () => void
+      onColorPicked: (callback: (hex: string) => void) => () => void
       beginCapture: (mode?: CaptureMode) => Promise<CaptureResult>
       beginRecord: (mode?: RecordMode) => Promise<CaptureResult>
       cancelCapture: () => Promise<void>

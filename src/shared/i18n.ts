@@ -193,6 +193,7 @@ export type TranslationKey =
   | 'settingsArrowHint'
   | 'shortcutFullscreen'
   | 'shortcutStudio'
+  | 'shortcutLiveColor'
   | 'shortcutRecordRegion'
   | 'shortcutRecordFullscreen'
   | 'shortcutRecordPause'
@@ -439,6 +440,7 @@ const translations: Record<ResolvedLanguage, Record<TranslationKey, string>> = {
     settingsArrowHint: 'Atalhos',
     shortcutFullscreen: 'Capturar tela inteira',
     shortcutStudio: 'Abrir estúdio',
+    shortcutLiveColor: 'Live Color (conta-gotas)',
     shortcutRecordRegion: 'Gravar região',
     shortcutRecordFullscreen: 'Gravar tela inteira',
     shortcutRecordPause: 'Pausar / retomar gravação',
@@ -686,6 +688,7 @@ const translations: Record<ResolvedLanguage, Record<TranslationKey, string>> = {
     settingsArrowHint: 'Shortcuts',
     shortcutFullscreen: 'Capture full screen',
     shortcutStudio: 'Open studio',
+    shortcutLiveColor: 'Live Color (eyedropper)',
     shortcutRecordRegion: 'Record region',
     shortcutRecordFullscreen: 'Record full screen',
     shortcutRecordPause: 'Pause / resume recording',
@@ -933,6 +936,7 @@ const translations: Record<ResolvedLanguage, Record<TranslationKey, string>> = {
     settingsArrowHint: 'Atajos',
     shortcutFullscreen: 'Capturar pantalla completa',
     shortcutStudio: 'Abrir estudio',
+    shortcutLiveColor: 'Live Color (cuentagotas)',
     shortcutRecordRegion: 'Grabar región',
     shortcutRecordFullscreen: 'Grabar pantalla completa',
     shortcutRecordPause: 'Pausar / reanudar grabación',
