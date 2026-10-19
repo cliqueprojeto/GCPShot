@@ -84,7 +84,7 @@
           "StartupWMClass": "gcpshot"
         }
       },
-      "icon": "build/icon.png",
+      "icon": "build/icons",
       "category": "Graphics",
       "target": [
         "deb"

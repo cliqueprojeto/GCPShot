@@ -2,7 +2,7 @@
 
 - Icone do GCPShot aplicado explicitamente nas janelas, identidade/reabertura da barra de tarefas Windows e Dock macOS.
 - Icone ICO externo ao app.asar no Windows, alem do icone embutido no executavel e nos atalhos.
-- Linux: identificador da janela alinhado ao arquivo desktop e ao icone instalado.
+- Linux: identificador da janela alinhado ao arquivo desktop, com icones de 16 a 512 px nos tamanhos padrao do tema hicolor.
 - Todos os avisos passam pelo painel personalizado GCPShot, incluindo aplicativo ativo na bandeja, salvamento, impressao, exportacao e erros de atalhos. Nenhum uso de Notification generica do Electron.
 - Enter copia e fecha a selecao. Durante edicao de texto, o primeiro Enter confirma a anotacao; o proximo copia. Campos e controles preservam seu comportamento de teclado.
 - Salvar PNG/JPEG/PDF, imprimir com sucesso ou preparar o WhatsApp Web fecha automaticamente a selecao.

@@ -19,7 +19,11 @@ async function bitmap(input, output) {
 ;(async () => {
   await sharp('build/icon-master.png').resize(1024, 1024).png().toFile('build/icon.png')
   const sizes = [16, 24, 32, 48, 64, 128, 256, 512]
-  for (const size of sizes) await sharp('build/icon.png').resize(size, size).png().toFile(`build/icon-${size}.png`)
+  await fs.mkdir('build/icons', { recursive: true })
+  for (const size of sizes) {
+    await sharp('build/icon.png').resize(size, size).png().toFile(`build/icon-${size}.png`)
+    await fs.copyFile(`build/icon-${size}.png`, `build/icons/${size}x${size}.png`)
+  }
   const { default: toIco } = await import('png-to-ico')
   await fs.writeFile('build/icon.ico', await toIco(sizes.filter((size) => size <= 256).map((size) => `build/icon-${size}.png`)))
   const icon = (await fs.readFile('build/icon.png')).toString('base64')

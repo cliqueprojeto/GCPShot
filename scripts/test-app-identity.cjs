@@ -27,7 +27,7 @@ module.exports = async function testAppIdentity(app, page) {
     assert.match(desktop, /^Name=GCPShot$/m)
     assert.match(desktop, /^StartupWMClass=gcpshot$/m)
     assert.match(desktop, /^Icon=gcpshot$/m)
-    assert.ok(existsSync('/usr/share/icons/hicolor/256x256/apps/gcpshot.png'))
+    for (const size of [16, 32, 48, 128, 256, 512]) assert.ok(existsSync(`/usr/share/icons/hicolor/${size}x${size}/apps/gcpshot.png`), `Missing ${size}px Linux icon`)
   }
   console.log('Application identity and platform icon checks passed.')
 }
