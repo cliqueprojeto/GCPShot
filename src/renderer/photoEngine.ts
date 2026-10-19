@@ -60,12 +60,14 @@ export function backgroundMask(canvas: HTMLCanvasElement, tolerance: number, see
   const y = Math.min(canvas.height - 1, Math.max(0, Math.round(seed.y * (canvas.height - 1))))
   const start = y * canvas.width + x, offset = start * 4
   const color = [data[offset], data[offset + 1], data[offset + 2]]
+  const transparentSeed = data[offset + 3] === 0
   const visited = new Uint8Array(count), queue = new Uint32Array(count)
   let head = 0, tail = 1
   queue[0] = start; visited[start] = 1
   const add = (index: number) => { if (!visited[index]) { visited[index] = 1; queue[tail++] = index } }
   while (head < tail) {
     const index = queue[head++], i = index * 4
+    if (transparentSeed && data[i + 3] > 0) continue
     const distance = Math.sqrt((data[i] - color[0]) ** 2 + (data[i + 1] - color[1]) ** 2 + (data[i + 2] - color[2]) ** 2)
     if (data[i + 3] && distance > tolerance * 4.42) continue
     data[i + 3] = 0

@@ -17,7 +17,8 @@ module.exports = async function testPhotoEditor(app, page) {
   }
   await page.screenshot({ path: 'release/settings-0.6.0.png' })
   await page.getByRole('button', { name: 'Fechar configurações', exact: true }).click()
-  const center = await sharp({ create: { width: 100, height: 80, channels: 4, background: '#5F42EB' } }).png().toBuffer()
+  const dark = await sharp({ create: { width: 20, height: 80, channels: 4, background: '#121212' } }).png().toBuffer()
+  const center = await sharp({ create: { width: 100, height: 80, channels: 4, background: '#5F42EB' } }).composite([{ input: dark, left: 0, top: 0 }]).png().toBuffer()
   const png = await sharp({ create: { width: 320, height: 240, channels: 4, background: '#ffffff' } }).composite([{ input: center, left: 110, top: 80 }]).png().toBuffer()
   await navigation.getByRole('button', { name: 'Captura', exact: true }).click()
   await page.evaluate((dataUrl) => {
@@ -43,6 +44,10 @@ module.exports = async function testPhotoEditor(app, page) {
   pixels = await readPixels()
   assert.equal(pixels.data[3], 0)
   assert.equal(pixels.data[(120 * 320 + 160) * 4 + 3], 255)
+  await editor.getByRole('button', { name: 'Remover fundo', exact: true }).click()
+  pixels = await readPixels()
+  assert.equal(pixels.data[(100 * 320 + 115) * 4 + 3], 255, 'A transparent seed must not erase connected dark foreground pixels')
+  await editor.getByRole('button', { name: 'Desfazer edição', exact: true }).click()
   const exportedPath = join(await app.evaluate(({ app }) => app.getPath('userData')), 'photo-editor-test.png')
   await app.evaluate(({ dialog }, path) => {
     const original = dialog.showSaveDialog
