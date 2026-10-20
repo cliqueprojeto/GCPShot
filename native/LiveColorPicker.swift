@@ -62,12 +62,7 @@ final class MagnifierView: NSView {
 
     func start() async {
         watchdog = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            if self.parent > 0 && kill(self.parent, 0) != 0 { self.finish("CANCEL"); return }
-            if Date().timeIntervalSince(self.startedAt) > 120 { self.finish("CANCEL"); return }
-            if self.samplingStarted && Date().timeIntervalSince(self.lastSampleAt) > 15 {
-                self.fail("A amostragem de tela parou de responder. Verifique a permissao de Gravacao de Tela do GCPShot nos Ajustes do Sistema.")
-            }
+            Task { @MainActor [weak self] in self?.checkHealth() }
         }
         if testMode == nil {
             guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
@@ -138,6 +133,14 @@ final class MagnifierView: NSView {
             if parent > 0 && kill(parent, 0) != 0 { finish("CANCEL"); return }
             _ = await sample()
             try? await Task.sleep(nanoseconds: 40_000_000)
+        }
+    }
+
+    func checkHealth() {
+        if parent > 0 && kill(parent, 0) != 0 { finish("CANCEL"); return }
+        if Date().timeIntervalSince(startedAt) > 120 { finish("CANCEL"); return }
+        if samplingStarted && Date().timeIntervalSince(lastSampleAt) > 15 {
+            fail("A amostragem de tela parou de responder. Verifique a permissao de Gravacao de Tela do GCPShot nos Ajustes do Sistema.")
         }
     }
 
