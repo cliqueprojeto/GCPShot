@@ -340,11 +340,19 @@ async function beginLiveColor(): Promise<ColorResult> {
       const child = spawn(executable, [String(process.pid)], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...(process.platform === 'linux' ? { GDK_SCALE: '1', GDK_DPI_SCALE: '1' } : {}) } })
       colorPickerProcess = child
       let output = '', error = ''
+      let timedOut = false
+      const timeout = process.platform === 'darwin' ? setTimeout(() => {
+        timedOut = true
+        child.kill('SIGKILL')
+      }, 135_000) : undefined
+      const clearPickerTimeout = (): void => { if (timeout) clearTimeout(timeout) }
       child.stdout?.on('data', (chunk: Buffer) => { output = (output + chunk.toString()).slice(-4096) })
       child.stderr?.on('data', (chunk: Buffer) => { error = (error + chunk.toString()).slice(-4096) })
-      child.once('error', reject)
+      child.once('error', (error) => { clearPickerTimeout(); reject(error) })
       child.once('close', (code) => {
+        clearPickerTimeout()
         if (isQuitting) { resolve(null); return }
+        if (timedOut) { reject(new Error('O Live Color foi encerrado por seguranca porque deixou de responder. Tente novamente.')); return }
         if (code !== 0) { reject(new Error(error.trim() || 'Nao foi possivel iniciar o Live Color.')); return }
         resolve(output.split(/\r?\n/).find((line) => /^#[0-9A-F]{6}$/.test(line)) ?? null)
       })

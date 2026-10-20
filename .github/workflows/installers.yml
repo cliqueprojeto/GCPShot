@@ -37,6 +37,9 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - name: Test macOS picker input and recovery
+        if: matrix.platform == 'mac'
+        run: node scripts/test-macos-picker.cjs
       - name: Test Linux picker
         if: matrix.platform == 'linux'
         run: xvfb-run -a -s '-screen 0 1280x800x24 -noreset' node scripts/test-linux-picker.cjs
@@ -53,6 +56,9 @@ jobs:
         if: matrix.platform == 'mac'
         run: |
           find release -name GCPShot.LiveColor -exec file {} \;
+          helper=$(find release -name GCPShot.LiveColor -print -quit)
+          test -n "$helper"
+          node scripts/test-macos-picker.cjs "$helper"
           hdiutil verify release/*.dmg
       - name: Install smoke test runner
         run: npm install --no-save --package-lock=false playwright
