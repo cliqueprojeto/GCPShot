@@ -7,6 +7,8 @@ module.exports = async function testLinuxIntegration(app, page) {
   const windowId = await (await app.browserWindow(page)).evaluate((window) => window.getNativeWindowHandle().readUInt32LE())
   const wmClass = execFileSync('xprop', ['-id', String(windowId), 'WM_CLASS'], { encoding: 'utf8' })
   assert.match(wmClass, /"gcpshot", "gcpshot"/)
+  if (page.url().includes('welcome.html')) await page.getByRole('button', { name: 'Começar', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Navegação principal' }).waitFor()
   const launch = (args) => new Promise((resolve, reject) => {
     const child = spawn(executable, args, { stdio: 'ignore' })
     const timer = setTimeout(() => { child.kill(); reject(new Error('Second instance did not exit')) }, 10000)
