@@ -332,7 +332,13 @@ function openColorWindow(view: 'colors' | 'palettes' = 'colors'): void {
   if (window.isMinimized()) window.restore()
   window.show()
   window.focus()
-  const send = (): void => window.webContents.send('colors:open', view)
+  const send = (): void => {
+    if (window.webContents.getURL().includes('/welcome.html')) {
+      showWelcome = false
+      void writeFile(join(app.getPath('userData'), 'welcome-version.txt'), app.getVersion(), 'utf8').catch((error) => console.error('GCPShot: welcome state', error))
+      loadRenderer(window, false, 'region', view)
+    } else window.webContents.send('colors:open', view)
+  }
   if (window.webContents.isLoading()) window.webContents.once('did-finish-load', send)
   else send()
 }
