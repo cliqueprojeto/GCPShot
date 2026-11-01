@@ -9,6 +9,9 @@ static GtkWidget *panel;
 static GdkPixbuf *pixels;
 static int red, green, blue, parent_pid, center_x = 13, center_y = 6;
 static gboolean finishing = FALSE;
+static int exit_status = 0;
+static gint64 grab_deadline;
+static gint64 session_deadline;
 
 static void finish(gboolean selected) {
     if (finishing) return;
@@ -69,13 +72,15 @@ static gboolean draw(GtkWidget *widget, cairo_t *cr, gpointer unused) {
 
 static gboolean button(GtkWidget *widget, GdkEventButton *event, gpointer unused) {
     (void)widget; (void)unused;
-    if (event->button == 1) { render(NULL); finish(TRUE); }
+    if (event->button == 1) { render(NULL); finish(pixels != NULL); }
+    else if (event->button == 3) finish(FALSE);
     return TRUE;
 }
 
 static gboolean key(GtkWidget *widget, GdkEventKey *event, gpointer unused) {
     (void)widget; (void)unused;
     if (event->keyval == GDK_KEY_Escape) finish(FALSE);
+    else if (event->keyval == GDK_KEY_Return || event->keyval == GDK_KEY_KP_Enter) finish(pixels != NULL);
     return TRUE;
 }
 
@@ -114,12 +119,43 @@ static int portal_pick(void) {
     return status;
 }
 
+static gboolean watch_parent(gpointer unused) {
+    (void)unused;
+    if ((parent_pid > 0 && kill(parent_pid, 0) == -1 && errno == ESRCH) || g_get_monotonic_time() > session_deadline) {
+        finish(FALSE); return G_SOURCE_REMOVE;
+    }
+    return G_SOURCE_CONTINUE;
+}
+
+static gboolean try_grab(gpointer unused) {
+    (void)unused;
+    GdkDisplay *display = gdk_display_get_default();
+    GdkCursor *cursor = gdk_cursor_new_from_name(display, "crosshair");
+    GdkGrabStatus grabbed = gdk_seat_grab(gdk_display_get_default_seat(display), gtk_widget_get_window(panel), GDK_SEAT_CAPABILITY_ALL, FALSE, cursor, NULL, NULL, NULL);
+    if (cursor) g_object_unref(cursor);
+    if (grabbed == GDK_GRAB_SUCCESS) {
+        render(NULL); g_timeout_add(33, render, NULL);
+        puts("READY"); fflush(stdout);
+        return G_SOURCE_REMOVE;
+    }
+    // A global shortcut or tray menu may still own the keyboard when we start.
+    if (g_get_monotonic_time() < grab_deadline) return G_SOURCE_CONTINUE;
+    fprintf(stderr, "Nao foi possivel iniciar o Live Color: teclado ou mouse ocupado. Solte as teclas do atalho e tente novamente.\n");
+    exit_status = 1;
+    finish(FALSE);
+    return G_SOURCE_REMOVE;
+}
+
 int main(int argc, char **argv) {
     parent_pid = argc > 1 ? atoi(argv[1]) : 0;
+    session_deadline = g_get_monotonic_time() + 120 * G_USEC_PER_SEC;
     gtk_init(&argc, &argv);
+    g_timeout_add(1000, watch_parent, NULL);
     if (!GDK_IS_X11_DISPLAY(gdk_display_get_default())) return portal_pick();
     panel = gtk_window_new(GTK_WINDOW_POPUP);
     gtk_window_set_title(GTK_WINDOW(panel), "GCPShot Live Color");
+    gtk_window_set_skip_taskbar_hint(GTK_WINDOW(panel), TRUE);
+    gtk_window_set_skip_pager_hint(GTK_WINDOW(panel), TRUE);
     gtk_window_set_default_size(GTK_WINDOW(panel), 267, 198);
     gtk_window_set_keep_above(GTK_WINDOW(panel), TRUE);
     gtk_widget_add_events(panel, GDK_BUTTON_RELEASE_MASK | GDK_KEY_PRESS_MASK);
@@ -127,14 +163,11 @@ int main(int argc, char **argv) {
     g_signal_connect(panel, "button-release-event", G_CALLBACK(button), NULL);
     g_signal_connect(panel, "key-press-event", G_CALLBACK(key), NULL);
     gtk_widget_show_all(panel);
-    GdkDisplay *display = gdk_display_get_default();
-    GdkCursor *cursor = gdk_cursor_new_from_name(display, "crosshair");
-    GdkGrabStatus grabbed = gdk_seat_grab(gdk_display_get_default_seat(display), gtk_widget_get_window(panel), GDK_SEAT_CAPABILITY_ALL, FALSE, cursor, NULL, NULL, NULL);
-    if (cursor) g_object_unref(cursor);
-    if (grabbed != GDK_GRAB_SUCCESS) { fprintf(stderr, "Nao foi possivel iniciar o Live Color.\n"); return 1; }
-    render(NULL); g_timeout_add(33, render, NULL);
-    puts("READY"); fflush(stdout); gtk_main();
-    gdk_seat_ungrab(gdk_display_get_default_seat(display));
+    grab_deadline = g_get_monotonic_time() + 3 * G_USEC_PER_SEC;
+    g_timeout_add(40, try_grab, NULL);
+    gtk_main();
+    gdk_seat_ungrab(gdk_display_get_default_seat(gdk_display_get_default()));
     if (pixels) g_object_unref(pixels);
-    return 0;
+    gtk_widget_destroy(panel);
+    return exit_status;
 }

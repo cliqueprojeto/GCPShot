@@ -37,6 +37,8 @@ let colorToastWindow: BrowserWindow | null = null
 let colorToastTimer: ReturnType<typeof setTimeout> | null = null
 let toastDestination: 'colors' | 'studio' | 'home' = 'colors'
 let showWelcome = false
+let startupComplete = false
+let pendingLaunchArgs: string[] | null = null
 
 const isDev = Boolean(process.env.ELECTRON_RENDERER_URL)
 app.setName('GCPShot')
@@ -45,6 +47,14 @@ if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal')
   app.commandLine.appendSwitch('class', 'gcpshot')
   app.setDesktopName('gcpshot.desktop')
+}
+const ownsInstance = process.platform !== 'linux' || app.requestSingleInstanceLock()
+if (!ownsInstance) app.quit()
+if (process.platform === 'linux' && ownsInstance) {
+  app.on('second-instance', (_event, argv) => {
+    if (!startupComplete) { pendingLaunchArgs = argv; return }
+    handleLinuxLaunch(argv)
+  })
 }
 const settingsPath = (): string => join(app.getPath('userData'), 'settings.json')
 const defaultSettings = defaultAppSettings
@@ -116,7 +126,7 @@ function applyLoginItemSettings(): void {
     if (settings.startWithWindows) {
       mkdirSync(directory, { recursive: true })
       const executable = process.execPath.replace(/([\\"`$])/g, '\\$1').replace(/%/g, '%%')
-      writeFileSync(path, `[Desktop Entry]\nType=Application\nName=GCPShot\nExec="${executable}" --hidden\nTerminal=false\nX-GNOME-Autostart-enabled=true\n`)
+      writeFileSync(path, `[Desktop Entry]\nType=Application\nName=GCPShot\nExec="${executable}" --hidden\nIcon=gcpshot\nStartupWMClass=gcpshot\nNoDisplay=true\nTerminal=false\nX-GNOME-Autostart-enabled=true\n`)
     } else if (existsSync(path)) unlinkSync(path)
     return
   }
@@ -327,6 +337,17 @@ function openColorWindow(view: 'colors' | 'palettes' = 'colors'): void {
   else send()
 }
 
+function handleLinuxLaunch(argv: string[]): void {
+  if (argv.includes('--hidden')) return
+  if (captureWindows.length) { captureWindows[0]?.focus(); return }
+  if (argv.includes('--live-color')) {
+    if (!colorPickerProcess) void beginLiveColor().then((result) => { if (result.error) notify('Live Color', result.error) })
+  } else if (!colorPickerProcess) {
+    if (argv.includes('--color-lab')) openColorWindow('colors')
+    else showMainWindow()
+  }
+}
+
 async function beginLiveColor(): Promise<ColorResult> {
   if (captureWindows.length) return { ok: false, error: 'Conclua a captura antes de iniciar o Live Color.' }
   if (colorPickerProcess) return { ok: false, error: 'O Live Color ja esta ativo.' }
@@ -341,7 +362,7 @@ async function beginLiveColor(): Promise<ColorResult> {
       colorPickerProcess = child
       let output = '', error = ''
       let timedOut = false
-      const timeout = process.platform === 'darwin' ? setTimeout(() => {
+      const timeout = process.platform === 'darwin' || process.platform === 'linux' ? setTimeout(() => {
         timedOut = true
         child.kill('SIGKILL')
       }, 135_000) : undefined
@@ -805,6 +826,7 @@ function registerIpc(): void {
       height: 560,
       show: false,
       title: 'Imprimir captura - GCPShot',
+      skipTaskbar: true,
       parent: captureWindow ?? mainWindow ?? undefined,
       modal: false,
       alwaysOnTop: true,
@@ -1019,6 +1041,7 @@ async function updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>
 }
 
 app.whenReady().then(async () => {
+  if (!ownsInstance) return
   if (process.platform === 'darwin') app.dock?.setIcon(getAppIcon())
   settings = await loadSettings()
   showWelcome = await readFile(join(app.getPath('userData'), 'welcome-version.txt'), 'utf8').then((version) => version !== app.getVersion()).catch(() => true)
@@ -1030,10 +1053,13 @@ app.whenReady().then(async () => {
   nativeTheme.on('updated', createTray)
 
   if (!shouldStartHidden()) {
-    createMainWindow()
+    createMainWindow(process.platform === 'linux' && process.argv.includes('--color-lab') ? 'colors' : 'home')
   }
 
   registerShortcuts()
+  startupComplete = true
+  if (process.platform === 'linux' && process.argv.includes('--live-color')) handleLinuxLaunch(process.argv)
+  if (pendingLaunchArgs) { handleLinuxLaunch(pendingLaunchArgs); pendingLaunchArgs = null }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow()

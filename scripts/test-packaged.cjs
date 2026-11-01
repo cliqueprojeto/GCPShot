@@ -9,6 +9,7 @@ const { resolve } = require('node:path')
   try {
     const page = await app.firstWindow()
     await require('./test-app-identity.cjs')(app, page)
+    await require('./test-linux-integration.cjs')(app, page)
     const errors = []
     page.on('pageerror', (error) => errors.push(error.message))
     await page.getByRole('button', { name: 'Color Lab', exact: true }).click()

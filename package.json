@@ -1,6 +1,6 @@
 {
   "name": "gcpshot",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "GCPShot - captura de tela premium da Gestão Cultural Pro.",
   "main": "out/main/index.js",
   "author": "Gestão Cultural Pro",
@@ -82,6 +82,18 @@
         "entry": {
           "Name": "GCPShot",
           "StartupWMClass": "gcpshot"
+        },
+        "desktopActions": {
+          "ColorLab": {
+            "Name": "Color Lab",
+            "Exec": "\"/opt/GCPShot/gcpshot\" --color-lab",
+            "Icon": "gcpshot"
+          },
+          "LiveColor": {
+            "Name": "Live Color",
+            "Exec": "\"/opt/GCPShot/gcpshot\" --live-color",
+            "Icon": "gcpshot"
+          }
         }
       },
       "icon": "build/icons",
