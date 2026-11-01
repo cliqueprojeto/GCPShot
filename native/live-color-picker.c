@@ -65,7 +65,7 @@ static gboolean draw(GtkWidget *widget, cairo_t *cr, gpointer unused) {
     cairo_select_font_face(cr, "sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL); cairo_set_font_size(cr, 11);
     char value[80]; snprintf(value, sizeof(value), "#%02X%02X%02X   rgb(%d, %d, %d)", red, green, blue, red, green, blue);
     cairo_set_source_rgb(cr, 1, 1, 1); cairo_move_to(cr, 11, 147); cairo_show_text(cr, value);
-    cairo_set_source_rgb(cr, 0.64, 0.71, 0.89); cairo_move_to(cr, 11, 168); cairo_show_text(cr, "GCPShot - Clique para copiar");
+    cairo_set_source_rgb(cr, 0.64, 0.71, 0.89); cairo_move_to(cr, 11, 168); cairo_show_text(cr, "GCPShot - Clique ou Enter para copiar");
     cairo_move_to(cr, 11, 187); cairo_show_text(cr, "Esc cancela - Amostragem em tempo real");
     return TRUE;
 }

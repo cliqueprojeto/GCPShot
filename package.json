@@ -81,7 +81,8 @@
       "desktop": {
         "entry": {
           "Name": "GCPShot",
-          "StartupWMClass": "gcpshot"
+          "StartupWMClass": "gcpshot",
+          "Actions": "ColorLab;LiveColor;"
         },
         "desktopActions": {
           "ColorLab": {
