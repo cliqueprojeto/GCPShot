@@ -187,12 +187,15 @@ export function cursorForResizeHandle(handle: ResizeHandle): string {
 export function eventMatchesShortcut(event: KeyboardEvent, shortcut: string): boolean {
   const parts = shortcut.split('+').map((part) => part.trim())
   const key = parts[parts.length - 1] ?? ''
-  const needsCtrl = parts.includes('Ctrl')
+  const commandOrControl = parts.includes('CommandOrControl') || parts.includes('CmdOrCtrl')
+  const mac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform || navigator.userAgent)
+  const needsCtrl = parts.includes('Ctrl') || parts.includes('Control') || (commandOrControl && !mac)
   const needsAlt = parts.includes('Alt')
   const needsShift = parts.includes('Shift')
-  const needsMeta = parts.includes('Super')
+  const needsMeta = parts.includes('Super') || parts.includes('Command') || parts.includes('Cmd') || (commandOrControl && mac)
 
   const keyMap: Record<string, string> = {
+    Enter: 'Return',
     Escape: 'Esc',
     ' ': 'Space',
     ArrowUp: 'Up',
@@ -201,7 +204,8 @@ export function eventMatchesShortcut(event: KeyboardEvent, shortcut: string): bo
     ArrowRight: 'Right'
   }
 
-  const eventKey = keyMap[event.key] ?? (event.key.length === 1 ? event.key.toUpperCase() : event.key)
+  const physicalKey = /^Key[A-Z]$/.test(event.code) ? event.code.slice(3) : /^Digit[0-9]$/.test(event.code) ? event.code.slice(5) : null
+  const eventKey = physicalKey ?? keyMap[event.key] ?? (event.key.length === 1 ? event.key.toUpperCase() : event.key)
 
   return (
     event.ctrlKey === needsCtrl &&

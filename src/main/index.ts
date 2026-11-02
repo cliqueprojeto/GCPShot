@@ -1112,7 +1112,7 @@ app.whenReady().then(async () => {
   if (process.platform === 'darwin') app.dock?.setIcon(getAppIcon())
   settings = await loadSettings()
   registerShortcuts(settings, true)
-  await saveSettings(settings)
+  await saveSettings(settings).catch((error) => console.error('GCPShot: nao foi possivel persistir os atalhos iniciais.', error))
   showWelcome = await readFile(join(app.getPath('userData'), 'welcome-version.txt'), 'utf8').then((version) => version !== app.getVersion()).catch(() => true)
   await loadColorLibrary()
 

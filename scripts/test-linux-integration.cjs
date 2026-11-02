@@ -8,10 +8,12 @@ module.exports = async function testLinuxIntegration(app, page) {
   const wmClass = execFileSync('xprop', ['-id', String(windowId), 'WM_CLASS'], { encoding: 'utf8' })
   assert.match(wmClass, /"gcpshot", "gcpshot"/)
   const launch = (args) => new Promise((resolve, reject) => {
-    const child = spawn(executable, args, { stdio: 'ignore' })
+    const child = spawn(executable, [...(process.env.GCP_TEST_NO_SANDBOX === '1' ? ['--no-sandbox'] : []), ...args], { stdio: ['ignore', 'ignore', 'pipe'] })
+    let errorOutput = ''
+    child.stderr.on('data', (chunk) => { errorOutput = (errorOutput + chunk.toString()).slice(-2000) })
     const timer = setTimeout(() => { child.kill(); reject(new Error('Second instance did not exit')) }, 10000)
     child.once('error', (error) => { clearTimeout(timer); reject(error) })
-    child.once('close', (code) => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error(`Second instance exited ${code}`)) })
+    child.once('close', (code, signal) => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error(`Second instance exited ${code}/${signal}: ${errorOutput}`)) })
   })
   await launch(['--color-lab'])
   await page.getByRole('heading', { name: 'Cor em foco', exact: true }).waitFor()
