@@ -1,0 +1,33 @@
+pkgname=gcpshot
+pkgver=0.7.0
+pkgrel=1
+pkgdesc='GCPShot - captura de tela, Color Lab e estudio de imagem'
+arch=('x86_64')
+url='https://gestaoculturalpro.com.br'
+license=('custom')
+depends=('alsa-lib' 'at-spi2-core' 'cairo' 'dbus' 'desktop-file-utils'
+         'expat' 'gcc-libs' 'glib2' 'glibc>=2.35' 'gtk3' 'libcups'
+         'libdrm' 'libnotify' 'libsecret' 'libx11' 'libxcb' 'libxcomposite'
+         'libxdamage' 'libxext' 'libxfixes' 'libxkbcommon' 'libxrandr'
+         'libxss' 'libxtst' 'mesa' 'nspr' 'nss' 'pango' 'systemd-libs' 'xdg-utils')
+optdepends=('xdg-desktop-portal: Captura e atalhos em sessoes Wayland'
+            'xdg-desktop-portal-kde: Integracao com Plasma e BigLinux')
+options=('!strip' '!debug')
+source=("GCPShot-${pkgver}-Linux-amd64.deb")
+noextract=("${source[0]}")
+sha256sums=('4a4968b536021c8cc997ec0646f7e86cb1ed59b0a85d2163d05023ebb9582f90')
+
+prepare() {
+  mkdir -p "$srcdir/deb"
+  bsdtar -xf "$srcdir/${source[0]}" -C "$srcdir/deb"
+}
+
+package() {
+  local archives=("$srcdir/deb/"data.tar.*)
+  [[ ${#archives[@]} -eq 1 && -f ${archives[0]} ]] || return 1
+  bsdtar -xf "${archives[0]}" -C "$pkgdir"
+  install -d "$pkgdir/usr/bin"
+  ln -s /opt/GCPShot/gcpshot "$pkgdir/usr/bin/gcpshot"
+  chmod 755 "$pkgdir/opt/GCPShot/gcpshot" "$pkgdir/opt/GCPShot/resources/GCPShot.LiveColor"
+  chmod 4755 "$pkgdir/opt/GCPShot/chrome-sandbox"
+}
