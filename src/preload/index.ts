@@ -3,6 +3,7 @@ import type { AppSettings, CaptureExportPayload, CaptureImagePayload, CaptureMod
 import type { StudioPickResult, StudioVideoPickResult } from '../shared/studio'
 import type { ColorLibrary, ColorResult } from '../shared/colors'
 import type { StoredCapture } from '../shared/studio'
+import type { ShortcutInfo } from '../shared/shortcuts'
 
 const api = {
   finishWelcome: (view: 'home' | 'studio' | 'colors'): Promise<void> => ipcRenderer.invoke('app:welcome-finish', view),
@@ -42,6 +43,8 @@ const api = {
   shareWhatsApp: (payload: CaptureExportPayload): Promise<CaptureResult> =>
     ipcRenderer.invoke('capture:share-whatsapp', payload),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
+  getShortcutInfo: (): Promise<ShortcutInfo> => ipcRenderer.invoke('settings:shortcut-info'),
+  setShortcutEditing: (enabled: boolean): Promise<void> => ipcRenderer.invoke('settings:shortcut-editing', enabled),
   updateSettings: (settings: Partial<AppSettings>): Promise<AppSettings> =>
     ipcRenderer.invoke('settings:update', settings),
   resetSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:reset'),

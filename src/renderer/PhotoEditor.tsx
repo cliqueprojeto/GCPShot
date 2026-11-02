@@ -1,18 +1,20 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type PointerEvent } from 'react'
 import ReactCrop, { type PercentCrop } from 'react-image-crop'
-import { Crop, Sun, SlidersHorizontal, Brush, Stamp, Image as ImageIcon, ZoomIn, ZoomOut, Scan, Undo2, Redo2, RotateCcw, RotateCw, FlipHorizontal2, FlipVertical2, WandSparkles, Eraser, Highlighter, Pen, Check, X, Save, Layers } from 'lucide-react'
+import { Crop, Sun, SlidersHorizontal, Brush, Stamp, Image as ImageIcon, ZoomIn, ZoomOut, Scan, Undo2, Redo2, RotateCcw, RotateCw, FlipHorizontal2, FlipVertical2, WandSparkles, Eraser, Highlighter, Pen, Check, X, Save, Layers, Ruler } from 'lucide-react'
+import { defaultPixelsPerCm, drawMeasurement, measureLabel, validMeasureScale } from '../shared/measurement'
+import { MeasurementLine } from './MeasurementLine'
 import { backgroundMask, loadPhoto, originalPhoto, photoCanvas, renderPhoto, type PhotoAdjustments } from './photoEngine'
 import 'react-image-crop/dist/ReactCrop.css'
 import './photo-editor.css'
 
 type Snapshot = { url: string; values: PhotoAdjustments }
 type Point = { x: number; y: number }
-type Tool = 'crop' | 'light' | 'filters' | 'draw' | 'retouch' | 'background'
+type Tool = 'crop' | 'light' | 'filters' | 'draw' | 'retouch' | 'background' | 'measure'
 export type PhotoEditorHandle = { exportImage: () => Promise<string> }
 const tools = [
   { id: 'crop', label: 'Recorte', icon: Crop }, { id: 'light', label: 'Luz e cor', icon: Sun },
   { id: 'filters', label: 'Filtros', icon: SlidersHorizontal }, { id: 'draw', label: 'Marcação', icon: Brush },
-  { id: 'retouch', label: 'Retoque local', icon: Stamp }, { id: 'background', label: 'Fundo', icon: ImageIcon }
+  { id: 'measure', label: 'Medir', icon: Ruler }, { id: 'retouch', label: 'Retoque local', icon: Stamp }, { id: 'background', label: 'Fundo', icon: ImageIcon }
 ] as const
 const presets = [ ['none', 'Original'], ['pb', 'P&B'], ['sepia', 'Sépia'], ['noir', 'Noir'], ['retro', 'Retrô'], ['chrome', 'Chrome'], ['film', 'Filme'], ['warm', 'Quente'] ] as const
 const sliders = [ ['brightness', 'Brilho'], ['exposure', 'Exposição'], ['contrast', 'Contraste'], ['highlights', 'Destaques'], ['shadows', 'Sombras'], ['saturation', 'Saturação'], ['warmth', 'Temperatura'], ['tint', 'Matiz'], ['vignette', 'Vinheta'] ] as const
@@ -30,6 +32,8 @@ export const PhotoEditor = forwardRef<PhotoEditorHandle, { source: string; name:
   const [ink, setInk] = useState('#5F42EB'), [brushSize, setBrushSize] = useState(18)
   const [brush, setBrush] = useState<'pen' | 'highlight' | 'erase' | 'clone' | 'soften'>('pen')
   const [points, setPoints] = useState<Point[]>([])
+  const [measurement, setMeasurement] = useState<{ from: Point; to: Point } | null>(null)
+  const [pixelsPerCm, setPixelsPerCm] = useState(defaultPixelsPerCm), [referenceCm, setReferenceCm] = useState(1)
   const stroke = useRef<Point[]>([]), strokeId = useRef<number | null>(null)
   const [clonePoint, setClonePoint] = useState<Point>({ x: .5, y: .5 })
   const [seed, setSeed] = useState<Point>({ x: 0, y: 0 }), [selectSeed, setSelectSeed] = useState(false)
@@ -39,10 +43,10 @@ export const PhotoEditor = forwardRef<PhotoEditorHandle, { source: string; name:
   const operation = useRef({ key: '', time: 0 })
   const request = useRef(0)
   useImperativeHandle(ref, () => ({ exportImage: async () => {
-    if (busy || strokeId.current !== null) throw new Error('Conclua a operação de edição antes de exportar.')
+    if (busy || strokeId.current !== null || measurement) throw new Error('Aplique ou cancele a medicao antes de exportar.')
     const current = documentRef.current
     return (await renderPhoto(current.url, current.values)).toDataURL('image/png')
-  } }), [busy])
+  } }), [busy, measurement])
 
   useEffect(() => {
     const id = ++request.current
@@ -70,6 +74,7 @@ export const PhotoEditor = forwardRef<PhotoEditorHandle, { source: string; name:
   }, [dimensions])
 
   function commit(next: Snapshot, key = '') {
+    setMeasurement(null)
     const now = Date.now()
     const previous = documentRef.current
     if (!key || key !== operation.current.key || now - operation.current.time > 600) {
@@ -115,7 +120,7 @@ export const PhotoEditor = forwardRef<PhotoEditorHandle, { source: string; name:
     if (busy || event.button !== 0) return
     const start = point(event)
     if (selectSeed && tool === 'background') { setSeed(start); setSelectSeed(false); return }
-    if (tool !== 'draw' && tool !== 'retouch') return
+    if (tool !== 'draw' && tool !== 'retouch' && tool !== 'measure') return
     if (tool === 'retouch' && event.altKey) { setClonePoint(start); return }
     event.currentTarget.setPointerCapture(event.pointerId)
     strokeId.current = event.pointerId; stroke.current = [start]; setPoints([start])
@@ -125,6 +130,7 @@ export const PhotoEditor = forwardRef<PhotoEditorHandle, { source: string; name:
     strokeId.current = null
     const path = [...stroke.current], selectedBrush = brush
     stroke.current = []; setPoints([])
+    if (tool === 'measure') { if (path.length) setMeasurement({ from: path[0], to: point(event) }); return }
     void rasterEdit((canvas) => {
       const ctx = canvas.getContext('2d')!, radius = brushSize / Math.max(.01, (zoom ?? fit)) / 2
       const backup = photoCanvas(canvas.width, canvas.height); backup.getContext('2d')!.drawImage(canvas, 0, 0)
@@ -166,7 +172,7 @@ export const PhotoEditor = forwardRef<PhotoEditorHandle, { source: string; name:
   }
   const scale = zoom ?? fit
   const rotation = ((document.values.rotation + 180) % 360 + 360) % 360 - 180
-  const changeTool = (next: Tool) => { setTool(next); setSelectSeed(false); if (next === 'draw') setBrush('pen'); if (next === 'retouch') setBrush('clone') }
+  const changeTool = (next: Tool) => { setTool(next); setSelectSeed(false); if (next !== 'measure') setMeasurement(null); if (next === 'draw') setBrush('pen'); if (next === 'retouch') setBrush('clone') }
   return <section className="photo-editor" aria-label="Editor de imagem">
     <div className="photo-toolbar" role="toolbar" aria-label="Ferramentas de imagem">
       {tools.map(({ id, label, icon: Icon }) => <button type="button" key={id} title={label} aria-label={label} aria-pressed={tool === id} onClick={() => changeTool(id)}><Icon size={18} /><span>{label}</span></button>)}
@@ -185,9 +191,13 @@ export const PhotoEditor = forwardRef<PhotoEditorHandle, { source: string; name:
       </div>
       <div className="photo-viewport" ref={viewport}>
         {preview && <div className="photo-image-frame" style={{ width: dimensions.width * scale, height: dimensions.height * scale }}>
-          {tool === 'crop' ? <ReactCrop crop={crop} aspect={aspect} ruleOfThirds onChange={(_, percent) => setCrop(percent)}><img src={preview} alt={name} draggable={false} /></ReactCrop> : <div className={tool === 'draw' || tool === 'retouch' || selectSeed ? 'photo-paint active' : 'photo-paint'} onPointerDown={beginStroke} onPointerMove={(event) => { if (strokeId.current === event.pointerId) { stroke.current.push(point(event)); setPoints([...stroke.current]) } }} onPointerUp={endStroke} onPointerCancel={() => { strokeId.current = null; stroke.current = []; setPoints([]) }}>
+          {tool === 'crop' ? <ReactCrop crop={crop} aspect={aspect} ruleOfThirds onChange={(_, percent) => setCrop(percent)}><img src={preview} alt={name} draggable={false} /></ReactCrop> : <div className={tool === 'draw' || tool === 'retouch' || tool === 'measure' || selectSeed ? 'photo-paint active' : 'photo-paint'} onPointerDown={beginStroke} onPointerMove={(event) => { if (strokeId.current === event.pointerId) { stroke.current.push(point(event)); setPoints([...stroke.current]) } }} onPointerUp={endStroke} onPointerCancel={() => { strokeId.current = null; stroke.current = []; setPoints([]) }}>
             <img src={preview} alt={name} draggable={false} />
-            {points.length > 0 && <svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden><polyline points={points.map((p) => `${p.x * 1000},${p.y * 1000}`).join(' ')} fill="none" stroke={brush === 'erase' ? '#ffffff' : ink} strokeOpacity={brush === 'highlight' ? .35 : .8} vectorEffect="non-scaling-stroke" strokeWidth={brushSize} strokeLinecap="round" strokeLinejoin="round" /></svg>}
+            {points.length > 0 && tool !== 'measure' && <svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden><polyline points={points.map((p) => `${p.x * 1000},${p.y * 1000}`).join(' ')} fill="none" stroke={brush === 'erase' ? '#ffffff' : ink} strokeOpacity={brush === 'highlight' ? .35 : .8} vectorEffect="non-scaling-stroke" strokeWidth={brushSize} strokeLinecap="round" strokeLinejoin="round" /></svg>}
+            {(measurement || (tool === 'measure' && points.length > 0)) && (() => {
+              const line = tool === 'measure' && points.length ? { from: points[0], to: points.at(-1)! } : measurement!
+              return <svg viewBox={`0 0 ${dimensions.width} ${dimensions.height}`} aria-label="Medicao em centimetros"><MeasurementLine from={{ x: line.from.x * dimensions.width, y: line.from.y * dimensions.height }} to={{ x: line.to.x * dimensions.width, y: line.to.y * dimensions.height }} color={ink} size={Math.max(2, dimensions.width / 600)} pixelsPerCm={pixelsPerCm} /></svg>
+            })()}
             {tool === 'background' && <span className="photo-seed" style={{ left: `${seed.x * 100}%`, top: `${seed.y * 100}%` }} />}
             {tool === 'retouch' && brush === 'clone' && <span className="photo-seed clone" style={{ left: `${clonePoint.x * 100}%`, top: `${clonePoint.y * 100}%` }} />}
           </div>}
@@ -199,6 +209,16 @@ export const PhotoEditor = forwardRef<PhotoEditorHandle, { source: string; name:
     <aside className="photo-properties" aria-label="Propriedades da imagem">
       <h3>{tools.find((item) => item.id === tool)?.label}</h3>
       <fieldset disabled={busy}>
+      {tool === 'measure' && <>
+        <label>Escala (px por cm)<input aria-label="Escala da imagem" type="number" min="0.01" max="1000000" step="0.01" value={Number(pixelsPerCm.toFixed(6))} onChange={(event) => { const value = Number(event.target.value); if (validMeasureScale(value)) setPixelsPerCm(value) }} /></label>
+        <label>Referencia conhecida (cm)<input aria-label="Referencia da imagem em cm" type="number" min="0.01" step="0.01" value={referenceCm} onChange={(event) => setReferenceCm(Number(event.target.value))} /></label>
+        <button className="photo-wide" disabled={!measurement || !(referenceCm > 0)} onClick={() => { if (!measurement) return; const value = Math.hypot((measurement.to.x - measurement.from.x) * dimensions.width, (measurement.to.y - measurement.from.y) * dimensions.height) / referenceCm; if (validMeasureScale(value)) setPixelsPerCm(value) }}>Calibrar pela medida</button>
+        <label>Cor da medida<input aria-label="Cor da medida" type="color" value={ink} onChange={(event) => setInk(event.target.value)} /></label>
+        <p className="photo-note">96 px/pol por padrao. Calibre para medidas fisicas reais.</p>
+        {measurement && <output aria-label="Distancia medida">{measureLabel({ x: measurement.from.x * dimensions.width, y: measurement.from.y * dimensions.height }, { x: measurement.to.x * dimensions.width, y: measurement.to.y * dimensions.height }, pixelsPerCm)}</output>}
+        <button className="photo-wide primary" disabled={!measurement} onClick={() => { if (!measurement) return; const line = measurement; void rasterEdit((canvas) => { const from = { x: line.from.x * canvas.width, y: line.from.y * canvas.height }, to = { x: line.to.x * canvas.width, y: line.to.y * canvas.height }; drawMeasurement(canvas.getContext('2d')!, from, to, measureLabel(from, to, pixelsPerCm), ink, Math.max(2, canvas.width / 600)); }) }}>Aplicar medida</button>
+        <button className="photo-wide" disabled={!measurement} onClick={() => setMeasurement(null)}>Cancelar medida</button>
+      </>}
       {tool === 'crop' && <>
         <label>Proporção<select aria-label="Proporção do recorte" value={aspect || 0} onChange={(event) => {
           const ratio = Number(event.target.value) || undefined

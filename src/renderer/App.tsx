@@ -33,6 +33,8 @@ import {
 } from './captureUtils'
 import { ActionIcon, ToolIcon, type EditorTool } from './icons'
 import { SettingsPanel, type SettingsTab } from './SettingsPanel'
+import { defaultPixelsPerCm, drawMeasurement, measureLabel, validMeasureScale } from '../shared/measurement'
+import { MeasurementLine } from './MeasurementLine'
 
 type StampTone = Extract<CaptureAction, { tool: 'stamp' }>['tone']
 type PendingText = {
@@ -40,7 +42,7 @@ type PendingText = {
   at: Point
   value: string
 }
-type ToolbarMenu = 'shapes' | 'colors' | 'size' | 'tool-options' | null
+type ToolbarMenu = 'shapes' | 'colors' | 'size' | 'tool-options' | 'measure' | null
 type SelectionAdjustState = {
   handle: ResizeHandle
   startPoint: Point
@@ -201,6 +203,7 @@ function actionTooltip(
 }
 
 function toolLabel(language: AppLanguage, tool: EditorTool): string {
+  if (tool === 'measure') return 'Medir distancia (cm)'
   const map: Partial<Record<EditorTool, Parameters<typeof t>[1]>> = {
     select: 'toolSelect',
     move: 'toolMove',
@@ -285,7 +288,7 @@ function Landing(): JSX.Element {
           <section className="workspace-support" aria-labelledby="workspace-support-title"><h2 id="workspace-support-title">Apoie o GCPShot</h2><ContributionPanel language={language} /></section>
         </main>}
     </WorkspaceShell>
-    {settingsOpen && <SettingsPanel settings={settings} language={language} settingsTab={settingsTab} recordingShortcut={recordingShortcut} onTabChange={setSettingsTab} onClose={() => setSettingsOpen(false)} onUpdateSetting={(patch) => void updateSetting(patch)} onReset={() => void resetSettings()} onRecordingShortcutChange={setRecordingShortcut} />}
+    {settingsOpen && <SettingsPanel settings={settings} language={language} settingsTab={settingsTab} recordingShortcut={recordingShortcut} onTabChange={setSettingsTab} onClose={() => setSettingsOpen(false)} onUpdateSetting={updateSetting} onReset={() => void resetSettings()} onRecordingShortcutChange={setRecordingShortcut} />}
   </>
 }
 
@@ -323,6 +326,14 @@ function CaptureOverlay(): JSX.Element {
   const [actions, setActions] = useState<CaptureAction[]>([])
   const [redoStack, setRedoStack] = useState<CaptureAction[]>([])
   const [draftAction, setDraftAction] = useState<CaptureAction | null>(null)
+  const [pixelsPerCm, setPixelsPerCm] = useState(defaultPixelsPerCm)
+  const [referenceCm, setReferenceCm] = useState(1)
+
+  function changeMeasureScale(value: number): void {
+    if (!validMeasureScale(value)) return
+    setPixelsPerCm(value)
+    setActions((current) => current.map((action) => action.tool === 'measure' ? { ...action, pixelsPerCm: value } : action))
+  }
   const [movingLast, setMovingLast] = useState<{ point: Point; action: CaptureAction } | null>(null)
   const [selectionAdjust, setSelectionAdjust] = useState<SelectionAdjustState | null>(null)
   const [selectionHoverHandle, setSelectionHoverHandle] = useState<ResizeHandle | null>(null)
@@ -778,7 +789,8 @@ function CaptureOverlay(): JSX.Element {
       size: tool === 'blur' || tool === 'pixelate' ? privacyIntensity : size,
       from: point,
       to: point,
-      showOutline: tool === 'blur' || tool === 'pixelate' ? showToolOutline : undefined
+      showOutline: tool === 'blur' || tool === 'pixelate' ? showToolOutline : undefined,
+      pixelsPerCm: tool === 'measure' ? pixelsPerCm : undefined
     }
   }
 
@@ -1343,6 +1355,11 @@ function CaptureOverlay(): JSX.Element {
 
     const from = toCanvas(action.from)
     const to = toCanvas(action.to)
+
+    if (action.tool === 'measure') {
+      drawMeasurement(context, from, to, measureLabel(action.from, action.to, action.pixelsPerCm), action.color, action.size * scale, scale)
+      return
+    }
 
     if (action.tool === 'blur' || action.tool === 'pixelate') {
       applyPrivacyEffect(context, getCanvasRect(from, to), action.tool, action.size)
@@ -1944,6 +1961,7 @@ function CaptureOverlay(): JSX.Element {
               )
             }
 
+            if (action.tool === 'measure') return <MeasurementLine key={action.id} from={action.from} to={action.to} pixelsPerCm={action.pixelsPerCm} color={action.color} size={action.size} />
             return (
               <g key={action.id}>
                 <line
@@ -2106,6 +2124,16 @@ function CaptureOverlay(): JSX.Element {
                   ))}
                 </div>
               )}
+            </div>
+
+            <div className="toolbar-menu">
+              <button type="button" className={tool === 'measure' ? 'active icon-tool' : 'icon-tool'} title="Medir distancia (cm)" aria-label="Medir distancia (cm)" onClick={() => { chooseTool('measure'); setOpenMenu(openMenu === 'measure' ? null : 'measure') }}><ToolIcon tool="measure" /></button>
+              {openMenu === 'measure' && <div className="toolbar-popover toolbar-popover-up measurement-options">
+                <label>Escala (px por cm)<input aria-label="Escala de medicao" type="number" min="0.01" max="1000000" step="0.01" value={Number(pixelsPerCm.toFixed(6))} onChange={(event) => changeMeasureScale(Number(event.target.value))} /></label>
+                <label>Referencia conhecida (cm)<input aria-label="Referencia em cm" type="number" min="0.01" step="0.01" value={referenceCm} onChange={(event) => setReferenceCm(Number(event.target.value))} /></label>
+                <button type="button" onClick={() => { const last = [...actions].reverse().find((action) => action.tool === 'measure'); if (last && 'from' in last && referenceCm > 0) changeMeasureScale(Math.hypot(last.to.x - last.from.x, last.to.y - last.from.y) / referenceCm) }}>Calibrar pela ultima medida</button>
+                <small>96 px/pol por padrao. Calibre a escala para medidas fisicas reais.</small>
+              </div>}
             </div>
 
             <div className="toolbar-menu">
@@ -2382,7 +2410,7 @@ function CaptureOverlay(): JSX.Element {
           overlay
           onTabChange={setSettingsTab}
           onClose={() => setSettingsOpen(false)}
-          onUpdateSetting={(patch) => void updateSetting(patch)}
+          onUpdateSetting={updateSetting}
           onReset={() => void resetSettings()}
           onRecordingShortcutChange={setRecordingShortcut}
         />

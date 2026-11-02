@@ -55,7 +55,7 @@ export type CaptureAction =
   | { id: string; tool: 'pen'; color: string; size: number; points: Array<{ x: number; y: number }> }
   | {
       id: string
-      tool: 'line' | 'arrow' | 'rect' | 'ellipse' | 'star' | 'magnifier' | 'blur' | 'pixelate'
+      tool: 'line' | 'arrow' | 'rect' | 'ellipse' | 'star' | 'magnifier' | 'blur' | 'pixelate' | 'measure'
       color: string
       size: number
       from: { x: number; y: number }
@@ -64,6 +64,7 @@ export type CaptureAction =
       magnifierRounded?: boolean
       magnifierCornerRadius?: number
       showOutline?: boolean
+      pixelsPerCm?: number
     }
   | {
       id: string

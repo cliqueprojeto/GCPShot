@@ -18,6 +18,10 @@
 .settings-backdrop .settings-content input[type=checkbox], .settings-backdrop .settings-content input[type=range] { accent-color: #5f42eb; }
 .settings-backdrop .settings-content button:not(.icon-button) { border-radius: 5px; box-shadow: none; }
 .settings-backdrop .settings-content .shortcut-recorder button { background: #5f42eb; font-weight: 600; }
+.settings-backdrop .shortcut-recorder { display: flex; flex-wrap: wrap; gap: 6px; }
+.settings-backdrop .shortcut-recorder input { min-width: 100px; flex: 1 1 140px; }
+.settings-backdrop .shortcut-row select { width: 100%; margin-top: 8px; }
+.settings-backdrop .shortcut-error { color: #ffb5bf; border: 1px solid #793d4a; padding: 10px; border-radius: 5px; overflow-wrap: anywhere; }
 .settings-backdrop .settings-content .shortcut-row-icon { background: #2b2841; border-radius: 4px; }
 .settings-backdrop .settings-content .settings-hint { color: #a7a3bb; background: #1a1b27; border-color: #30313f; border-radius: 5px; }
 .settings-backdrop .settings-content label > span { color: #c8c7d9; }

@@ -23,6 +23,7 @@ import { normalizeHex, parseLibrary, type ColorResult } from '../shared/colors'
 import { getColorLibrary, loadColorLibrary, saveColorLibrary } from './colorLibrary'
 import { getStoredCaptures, removeStoredCapture, storeCapture } from './captureStore'
 import { DEVELOPER_CREDIT, GCP_SITE_URL, ORGANIZATION_NAME, isProjectSiteUrl } from '../shared/branding'
+import { canonicalShortcut, globalShortcutKeys, shortcutCandidates, shortcutIdentity, validGlobalShortcut, type ShortcutInfo } from '../shared/shortcuts'
 
 type MainView = 'home' | 'studio' | 'colors' | 'palettes'
 
@@ -39,6 +40,10 @@ let toastDestination: 'colors' | 'studio' | 'home' = 'colors'
 let showWelcome = false
 let startupComplete = false
 let pendingLaunchArgs: string[] | null = null
+const shortcutEditors = new Set<number>()
+const shortcutEditorOwners = new Set<number>()
+let shortcutIssues: string[] = []
+let settingsQueue: Promise<unknown> = Promise.resolve()
 
 const isDev = Boolean(process.env.ELECTRON_RENDERER_URL)
 app.setName('GCPShot')
@@ -107,12 +112,14 @@ async function loadSettings(): Promise<AppSettings> {
     const file = await readFile(settingsPath(), 'utf8')
     return normalizeSettingsShortcuts({ ...defaultSettings, ...JSON.parse(file) })
   } catch {
-    return defaultSettings
+    const defaults = { ...defaultSettings }
+    for (const key of globalShortcutKeys) defaults[key] = shortcutCandidates(process.platform, key)[0]
+    return defaults
   }
 }
 
 function normalizeAccelerator(accelerator: string): string {
-  return accelerator.replace(/\bControl\b/g, 'Ctrl')
+  return canonicalShortcut(accelerator)
 }
 
 async function saveSettings(nextSettings: AppSettings): Promise<void> {
@@ -446,11 +453,6 @@ async function showAboutDialog(): Promise<void> {
 }
 
 function createTray(): void {
-  if (tray) {
-    tray.destroy()
-    tray = null
-  }
-
   let icon = getAppIcon()
 
   if (icon.isEmpty()) {
@@ -459,7 +461,10 @@ function createTray(): void {
     )
   }
 
-  tray = new Tray(icon.resize({ width: 16, height: 16 }))
+  if (!tray || tray.isDestroyed()) {
+    tray = new Tray(icon.resize({ width: 16, height: 16 }))
+    if (process.platform !== 'linux') tray.on('click', () => tray?.popUpContextMenu())
+  } else tray.setImage(icon.resize({ width: 16, height: 16 }))
   tray.setToolTip('GCPShot')
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -469,7 +474,7 @@ function createTray(): void {
       { label: 'Abrir o Estúdio', icon: trayMenuIcon('studio'), click: openStudioWindow },
       { label: 'Color Lab', icon: trayMenuIcon('colors'), click: () => openColorWindow('colors') },
       { label: 'Minhas Paletas', icon: trayMenuIcon('palettes'), click: () => openColorWindow('palettes') },
-      { label: 'Live Color', icon: trayMenuIcon('live'), accelerator: settings.liveColorShortcut, click: () => void beginLiveColor().then((result) => { if (result.error) notify('Live Color', result.error) }) },
+      { label: 'Live Color', icon: trayMenuIcon('live'), accelerator: settings.liveColorShortcut, registerAccelerator: false, click: () => void beginLiveColor().then((result) => { if (result.error) notify('Live Color', result.error) }) },
       { type: 'separator' },
       { label: 'Configurações', icon: trayMenuIcon('settings'), click: openSettingsWindow },
       { label: 'Sobre', icon: trayMenuIcon('about'), click: () => void showAboutDialog().catch((error) => console.error('GCPShot: não foi possível abrir Sobre.', error)) },
@@ -493,7 +498,6 @@ function createTray(): void {
       }
     ])
   )
-  tray.on('click', () => tray?.popUpContextMenu())
 }
 
 function trayMenuIcon(name: string): Electron.NativeImage {
@@ -896,16 +900,28 @@ function registerIpc(): void {
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : 'Não foi possível abrir o WhatsApp Web.' } }
   })
   ipcMain.handle('settings:get', () => settings)
+  ipcMain.handle('settings:shortcut-info', () => shortcutInfo())
+  ipcMain.handle('settings:shortcut-editing', (event, enabled: boolean) => {
+    const id = event.sender.id
+    if (enabled) {
+      if (!shortcutEditorOwners.has(id)) {
+        shortcutEditorOwners.add(id)
+        event.sender.once('destroyed', () => { shortcutEditors.delete(id); shortcutEditorOwners.delete(id); if (!isQuitting && shortcutEditors.size === 0) registerShortcuts(settings, true) })
+      }
+      shortcutEditors.add(id)
+      globalShortcut.unregisterAll()
+    } else {
+      shortcutEditors.delete(id)
+      if (shortcutEditors.size === 0) registerShortcuts(settings, true)
+    }
+  })
   ipcMain.handle('settings:update', async (_event, patch: Partial<AppSettings>): Promise<AppSettings> => {
     return updateSettings(patch)
   })
   ipcMain.handle('settings:reset', async (): Promise<AppSettings> => {
-    settings = { ...defaultSettings }
-    await saveSettings(settings)
-    applyLoginItemSettings()
-    registerShortcuts()
-    createTray()
-    return settings
+    const defaults = { ...defaultSettings }
+    for (const key of globalShortcutKeys) defaults[key] = shortcutCandidates(process.platform, key)[0]
+    return updateSettings(defaults)
   })
   ipcMain.handle('window:show-main', () => {
     showMainWindow()
@@ -1014,42 +1030,89 @@ function registerIpc(): void {
   })
 }
 
-function registerShortcuts(): void {
+function registerShortcuts(next = settings, recover = true): void {
   globalShortcut.unregisterAll()
-
-  const startRegion = (): void => {
-    void beginCapture('region')
+  const handlers = {
+    captureShortcut: () => { void beginCapture('region') }, fullscreenShortcut: () => { void beginCapture('fullscreen') },
+    studioShortcut: openStudioWindow, liveColorShortcut: () => { void beginLiveColor().then((result) => { if (result.error) notify('Live Color', result.error) }) }
   }
-
-  const startFullscreen = (): void => {
-    void beginCapture('fullscreen')
-  }
-
-  globalShortcut.register(settings.captureShortcut, startRegion)
-  globalShortcut.register(settings.fullscreenShortcut, startFullscreen)
-  globalShortcut.register(settings.studioShortcut, openStudioWindow)
-  const registered = globalShortcut.register(settings.liveColorShortcut, () => void beginLiveColor().then((result) => { if (result.error) notify('Live Color', result.error) }))
-  if (!registered) notify('Atalho Live Color indisponivel', 'Escolha outro atalho nas configuracoes; essa combinacao esta em uso.')
-
-  if (settings.printScreenShortcut) {
-    globalShortcut.register('PrintScreen', () => void beginCapture('region', true))
+  const used = new Set<string>()
+  const issues: string[] = []
+  try {
+    for (const key of globalShortcutKeys) {
+      const requested = canonicalShortcut(next[key])
+      const options = recover ? [requested, ...shortcutCandidates(process.platform, key)] : [requested]
+      let chosen = ''
+      for (const value of [...new Set(options)]) {
+        const identity = shortcutIdentity(value, process.platform)
+        if (!validGlobalShortcut(value) || used.has(identity)) continue
+        try { if (globalShortcut.register(value, handlers[key])) { chosen = value; used.add(identity); break } } catch { /* Invalid or reserved by the desktop. */ }
+      }
+      if (!chosen) {
+        const error = `${key}: ${requested} indisponivel ou em conflito. Escolha uma sugestao nas configuracoes.`
+        if (!recover) throw new Error(error)
+        issues.push(error)
+      } else {
+        if (chosen !== requested) issues.push(`${requested} indisponivel; usando ${chosen}.`)
+        next[key] = chosen
+      }
+    }
+    if (next.printScreenShortcut) {
+      let registered = false
+      try { registered = globalShortcut.register('PrintScreen', () => void beginCapture('region', true)) } catch { /* Reserved by the system. */ }
+      if (!registered) issues.push('Print Screen esta reservado pelo sistema; use o atalho de captura.')
+    }
+    shortcutIssues = issues
+  } finally {
+    if (shortcutEditors.size) globalShortcut.unregisterAll()
   }
 }
 
-async function updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
-  settings = normalizeSettingsShortcuts({ ...settings, ...patch })
-  await saveSettings(settings)
-  applyLoginItemSettings()
-  registerShortcuts()
-  createTray()
+function shortcutInfo(): ShortcutInfo {
+  const suggestions = {} as ShortcutInfo['suggestions']
+  // Wayland portal registration is asynchronous and consent-gated: never probe it.
+  const portal = process.platform === 'linux' && process.env.XDG_SESSION_TYPE === 'wayland'
+  for (const key of globalShortcutKeys) {
+    suggestions[key] = shortcutCandidates(process.platform, key).filter((value) => {
+      if (globalShortcutKeys.some((other) => other !== key && shortcutIdentity(settings[other], process.platform) === shortcutIdentity(value, process.platform))) return false
+      if (portal || globalShortcut.isRegistered(value)) return true
+      try {
+        if (!globalShortcut.register(value, () => {})) return false
+        globalShortcut.unregister(value)
+        return true
+      } catch { return false }
+    })
+  }
+  return { platform: process.platform === 'darwin' ? `macOS ${process.arch === 'arm64' ? 'Apple Silicon' : 'Intel'}` : process.platform === 'win32' ? 'Windows' : 'Linux', suggestions, issues: shortcutIssues, portal }
+}
 
-  return settings
+function updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
+  const operation = settingsQueue.then(async () => {
+    const previous = { ...settings }
+    const next = normalizeSettingsShortcuts({ ...settings, ...patch })
+    const changed = globalShortcutKeys.some((key) => next[key] !== previous[key]) || next.printScreenShortcut !== previous.printScreenShortcut
+    try {
+      if (changed) registerShortcuts(next, false)
+      await saveSettings(next)
+      settings = next
+    } catch (error) {
+      if (changed) registerShortcuts(previous, true)
+      throw error
+    }
+    if (next.startWithWindows !== previous.startWithWindows) applyLoginItemSettings()
+    createTray()
+    return settings
+  })
+  settingsQueue = operation.catch(() => {})
+  return operation
 }
 
 app.whenReady().then(async () => {
   if (!ownsInstance) return
   if (process.platform === 'darwin') app.dock?.setIcon(getAppIcon())
   settings = await loadSettings()
+  registerShortcuts(settings, true)
+  await saveSettings(settings)
   showWelcome = await readFile(join(app.getPath('userData'), 'welcome-version.txt'), 'utf8').then((version) => version !== app.getVersion()).catch(() => true)
   await loadColorLibrary()
 
@@ -1062,7 +1125,6 @@ app.whenReady().then(async () => {
     createMainWindow(process.platform === 'linux' && process.argv.includes('--color-lab') ? 'colors' : 'home')
   }
 
-  registerShortcuts()
   startupComplete = true
   if (process.platform === 'linux' && process.argv.includes('--live-color')) handleLinuxLaunch(process.argv)
   if (pendingLaunchArgs) { handleLinuxLaunch(pendingLaunchArgs); pendingLaunchArgs = null }
@@ -1076,6 +1138,8 @@ app.on('before-quit', () => {
   isQuitting = true
   colorPickerProcess?.kill()
   closeColorToast()
+  tray?.destroy()
+  tray = null
 })
 
 app.on('window-all-closed', () => {

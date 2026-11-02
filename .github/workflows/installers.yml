@@ -33,7 +33,7 @@ jobs:
           cache: npm
       - name: Install Linux build dependencies
         if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev xvfb xdotool x11-xserver-utils x11-utils
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev xvfb xdotool x11-xserver-utils x11-utils rpm
       - run: npm ci
       - run: npm test
       - run: npm run build
@@ -65,6 +65,9 @@ jobs:
       - name: Test installed Linux application
         if: matrix.platform == 'linux'
         run: xvfb-run -a node scripts/test-packaged.cjs
+      - name: Test RPM installed on Fedora
+        if: matrix.platform == 'linux'
+        run: docker run --rm -v "$PWD:/work" -w /work fedora:43 bash scripts/test-fedora-rpm.sh
       - name: Test packaged macOS application
         if: matrix.platform == 'mac'
         run: node scripts/test-packaged.cjs
@@ -77,5 +80,6 @@ jobs:
           path: |
             release/*.dmg
             release/*.deb
+            release/*.rpm
             release/*.exe
           if-no-files-found: error

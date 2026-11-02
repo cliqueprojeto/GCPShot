@@ -42,9 +42,11 @@ module.exports = async function testLinuxIntegration(app, page) {
   execFileSync('xdotool', ['mousemove', '100', '100'])
   await app.evaluate(({ clipboard }) => clipboard.writeText('before-picker'))
   // Reproduce a real global accelerator with modifiers held after activation.
-  execFileSync('xdotool', ['keydown', 'ctrl', 'keydown', 'shift', 'keydown', 'c'])
+  const shortcut = (await page.evaluate(() => window.gcpshot.getSettings())).liveColorShortcut
+  const keys = shortcut.split('+').map((key) => ({ Ctrl: 'ctrl', Alt: 'alt', Shift: 'shift', Super: 'super', Command: 'super' })[key] || key.toLowerCase())
+  execFileSync('xdotool', keys.flatMap((key) => ['keydown', key]))
   try { await new Promise((resolve) => setTimeout(resolve, 500)) }
-  finally { execFileSync('xdotool', ['keyup', 'c', 'keyup', 'shift', 'keyup', 'ctrl']) }
+  finally { execFileSync('xdotool', [...keys].reverse().flatMap((key) => ['keyup', key])) }
   await new Promise((resolve) => setTimeout(resolve, 700))
   execFileSync('xdotool', ['click', '1'])
   await page.waitForFunction(async () => {

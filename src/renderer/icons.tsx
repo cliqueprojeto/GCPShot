@@ -1,8 +1,10 @@
 import type { CaptureAction } from '../shared/capture'
+import { Ruler } from 'lucide-react'
 
 export type EditorTool = CaptureAction['tool'] | 'select' | 'move'
 
 export function ToolIcon({ tool }: { tool: EditorTool }): JSX.Element {
+  if (tool === 'measure') return <Ruler className="tool-svg" aria-hidden="true" />
   const common = {
     fill: 'none',
     stroke: 'currentColor',

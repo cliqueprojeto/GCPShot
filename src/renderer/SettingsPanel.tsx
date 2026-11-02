@@ -5,6 +5,8 @@ import type { AppLanguage, TranslationKey } from '../shared/i18n'
 import { t } from '../shared/i18n'
 import { ActionIcon, ToolIcon, type EditorTool } from './icons'
 import { Settings2, Keyboard, FileImage, X } from 'lucide-react'
+import type { GlobalShortcutKey, ShortcutInfo } from '../shared/shortcuts'
+import { globalShortcutKeys } from '../shared/shortcuts'
 import './settings.css'
 
 export type SettingsTab = 'general' | 'shortcuts' | 'formats' | 'video' | 'audio'
@@ -96,7 +98,7 @@ type SettingsPanelProps = {
   overlay?: boolean
   onTabChange: (tab: SettingsTab) => void
   onClose: () => void
-  onUpdateSetting: (patch: Partial<AppSettings>) => void
+  onUpdateSetting: (patch: Partial<AppSettings>) => Promise<void> | void
   onReset: () => void
   onRecordingShortcutChange: (key: SettingsShortcutKey | null) => void
 }
@@ -114,6 +116,15 @@ export function SettingsPanel({
   onRecordingShortcutChange
 }: SettingsPanelProps): JSX.Element {
   const [shortcutDrafts, setShortcutDrafts] = useState<Partial<Record<SettingsShortcutKey, string>>>({})
+  const [shortcutInfo, setShortcutInfo] = useState<ShortcutInfo | null>(null)
+  const [shortcutError, setShortcutError] = useState('')
+  const [savingShortcut, setSavingShortcut] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    void window.gcpshot.setShortcutEditing(true).then(() => window.gcpshot.getShortcutInfo()).then((info) => { if (active) setShortcutInfo(info) }).catch((error) => { if (active) setShortcutError(String(error)) })
+    return () => { active = false; void window.gcpshot.setShortcutEditing(false).catch(() => {}) }
+  }, [])
 
   useEffect(() => {
     setShortcutDrafts({})
@@ -123,10 +134,15 @@ export function SettingsPanel({
     return shortcutDrafts[key] ?? settings[key]
   }
 
-  function commitShortcut(key: SettingsShortcutKey, shortcut: string): void {
+  async function commitShortcut(key: SettingsShortcutKey, shortcut: string): Promise<void> {
     setShortcutDrafts((current) => ({ ...current, [key]: shortcut }))
     onRecordingShortcutChange(null)
-    onUpdateSetting({ [key]: shortcut } as Partial<AppSettings>)
+    setSavingShortcut(true); setShortcutError('')
+    try {
+      await onUpdateSetting({ [key]: shortcut } as Partial<AppSettings>)
+      setShortcutInfo(await window.gcpshot.getShortcutInfo())
+    } catch (error) { setShortcutError(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': Error: /, '') : 'Nao foi possivel salvar o atalho.') }
+    finally { setSavingShortcut(false) }
   }
 
   const tabs = useMemo(
@@ -213,6 +229,9 @@ export function SettingsPanel({
 
         {settingsTab === 'shortcuts' && (
           <>
+            <p className="settings-hint">Sistema detectado: {shortcutInfo?.platform ?? '…'}. {shortcutInfo?.portal ? 'Atalhos dependem da autorizacao do portal Wayland.' : 'Sugestoes verificadas nesta sessao; outros aplicativos podem reservar teclas depois.'}</p>
+            {shortcutInfo?.issues.map((issue) => <p className="settings-hint" key={issue}>{issue}</p>)}
+            {shortcutError && <p role="alert" className="shortcut-error">{shortcutError}</p>}
             <div className="settings-grid">
               <label>
                 <span>{t(language, 'mainShortcut')}</span>
@@ -220,7 +239,7 @@ export function SettingsPanel({
                   value={shortcutOptions.includes(settings.captureShortcut) ? settings.captureShortcut : 'custom'}
                   onChange={(event) => {
                     if (event.currentTarget.value !== 'custom') {
-                      onUpdateSetting({ captureShortcut: event.currentTarget.value })
+                      void commitShortcut('captureShortcut', event.currentTarget.value)
                     }
                   }}
                 >
@@ -236,13 +255,14 @@ export function SettingsPanel({
                 <span>{t(language, 'recordShortcut')}</span>
                 <div className="shortcut-recorder">
                   <input
-                    readOnly
+                    readOnly={recordingShortcut === 'captureShortcut'}
+                    aria-label="Atalho principal de captura"
                     value={
                       recordingShortcut === 'captureShortcut'
                         ? t(language, 'recording')
                         : displayShortcut('captureShortcut')
                     }
-                    onFocus={() => onRecordingShortcutChange('captureShortcut')}
+                    onChange={(event) => setShortcutDrafts((current) => ({ ...current, captureShortcut: event.target.value }))}
                     onKeyDown={(event) => {
                       if (recordingShortcut !== 'captureShortcut') {
                         return
@@ -252,18 +272,18 @@ export function SettingsPanel({
                       const shortcut = shortcutFromKeyboardEvent(event)
 
                       if (shortcut) {
-                        commitShortcut('captureShortcut', shortcut)
+                        void commitShortcut('captureShortcut', shortcut)
                       }
                     }}
                   />
                   <button
                     type="button"
-                    onClick={() =>
-                      onRecordingShortcutChange(recordingShortcut === 'captureShortcut' ? null : 'captureShortcut')
-                    }
+                    disabled={savingShortcut}
+                    onClick={(event) => { onRecordingShortcutChange(recordingShortcut === 'captureShortcut' ? null : 'captureShortcut'); (event.currentTarget.previousElementSibling as HTMLInputElement)?.focus() }}
                   >
                     {recordingShortcut === 'captureShortcut' ? t(language, 'listening') : t(language, 'record')}
                   </button>
+                  <button type="button" disabled={savingShortcut} onClick={() => void commitShortcut('captureShortcut', displayShortcut('captureShortcut'))}>Salvar</button>
                 </div>
               </label>
             </div>
@@ -286,11 +306,12 @@ export function SettingsPanel({
                   </span>
                   <div className="shortcut-recorder">
                     <input
-                      readOnly
+                      readOnly={recordingShortcut === field.key}
+                      aria-label={`Atalho ${t(language, field.labelKey)}`}
                       value={
                         recordingShortcut === field.key ? t(language, 'recording') : displayShortcut(field.key)
                       }
-                      onFocus={() => onRecordingShortcutChange(field.key)}
+                      onChange={(event) => setShortcutDrafts((current) => ({ ...current, [field.key]: event.target.value }))}
                       onKeyDown={(event) => {
                         if (recordingShortcut !== field.key) {
                           return
@@ -300,19 +321,20 @@ export function SettingsPanel({
                         const shortcut = shortcutFromKeyboardEvent(event)
 
                         if (shortcut) {
-                          commitShortcut(field.key, shortcut)
+                          void commitShortcut(field.key, shortcut)
                         }
                       }}
                     />
                     <button
                       type="button"
-                      onClick={() =>
-                        onRecordingShortcutChange(recordingShortcut === field.key ? null : field.key)
-                      }
+                      disabled={savingShortcut}
+                      onClick={(event) => { onRecordingShortcutChange(recordingShortcut === field.key ? null : field.key); (event.currentTarget.previousElementSibling as HTMLInputElement)?.focus() }}
                     >
                       {recordingShortcut === field.key ? t(language, 'listening') : t(language, 'record')}
                     </button>
+                    <button type="button" disabled={savingShortcut} aria-label={`Salvar atalho ${t(language, field.labelKey)}`} onClick={() => void commitShortcut(field.key, displayShortcut(field.key))}>Salvar</button>
                   </div>
+                  {globalShortcutKeys.includes(field.key as GlobalShortcutKey) && <select aria-label={`Sugestoes ${t(language, field.labelKey)}`} value="" disabled={savingShortcut} onChange={(event) => { if (event.target.value) void commitShortcut(field.key, event.target.value) }}><option value="">Sugestoes disponiveis</option>{shortcutInfo?.suggestions[field.key as GlobalShortcutKey]?.map((value) => <option value={value} key={value}>{value}</option>)}</select>}
                 </label>
               ))}
             </div>
