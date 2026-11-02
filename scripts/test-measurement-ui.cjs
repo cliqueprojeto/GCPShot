@@ -57,8 +57,12 @@ module.exports = async function testMeasurement(app, page) {
   const path = join(await app.evaluate(({ app }) => app.getPath('userData')), 'measurement-export.png')
   await app.evaluate(({ dialog }, path) => { const old = dialog.showSaveDialog; dialog.showSaveDialog = async () => { dialog.showSaveDialog = old; return { canceled: false, filePath: path } } }, path)
   await page.getByRole('button', { name: 'Exportar PNG', exact: true }).click()
-  for (let i = 0; i < 40; i++) { try { readFileSync(path); break } catch { await page.waitForTimeout(100) } }
-  const exported = await sharp(readFileSync(path)).removeAlpha().raw().toBuffer({ resolveWithObject: true })
+  let exported
+  for (let i = 0; i < 40; i++) {
+    try { exported = await sharp(readFileSync(path)).removeAlpha().raw().toBuffer({ resolveWithObject: true }); break }
+    catch { await page.waitForTimeout(100) }
+  }
+  assert.ok(exported, 'The exported measurement PNG must finish writing and decode successfully')
   assert.equal(exported.info.width, 600); assert.equal(exported.info.height, 400)
   let purple = 0
   for (let i = 0; i < exported.data.length; i += 3) if (exported.data[i] < 130 && exported.data[i + 1] < 120 && exported.data[i + 2] > 180) purple++
