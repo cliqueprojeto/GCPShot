@@ -61,7 +61,8 @@ function shortcutFromKeyboardEvent(event: React.KeyboardEvent<HTMLInputElement>)
     ArrowLeft: 'Left',
     ArrowRight: 'Right'
   }
-  const baseKey = keyMap[event.key] ?? event.key.toUpperCase()
+  const physicalKey = /^Key[A-Z]$/.test(event.code) ? event.code.slice(3) : /^Digit[0-9]$/.test(event.code) ? event.code.slice(5) : null
+  const baseKey = physicalKey ?? keyMap[event.key] ?? event.key.toUpperCase()
 
   if (!baseKey) {
     return null

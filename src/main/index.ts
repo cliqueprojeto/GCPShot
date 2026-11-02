@@ -119,7 +119,7 @@ async function loadSettings(): Promise<AppSettings> {
 }
 
 function normalizeAccelerator(accelerator: string): string {
-  return canonicalShortcut(accelerator)
+  return canonicalShortcut(canonicalShortcut(accelerator).replace(/\bSuper\b/g, process.platform === 'darwin' ? 'Command' : 'Super'))
 }
 
 async function saveSettings(nextSettings: AppSettings): Promise<void> {

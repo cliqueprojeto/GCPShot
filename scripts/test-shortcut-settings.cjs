@@ -11,6 +11,8 @@ module.exports = async function testShortcutSettings(app, page) {
   const original = await page.evaluate(() => window.gcpshot.getSettings())
   try {
     await page.locator('.workspace-sidebar').getByRole('button', { name: 'Configurações', exact: true }).click()
+    await page.getByRole('dialog').getByRole('tab').nth(2).click()
+    await page.getByRole('dialog').locator('select').nth(1).selectOption('pt-BR')
     await page.getByRole('dialog').getByRole('tab').nth(1).click()
     await page.getByText('Sistema detectado:', { exact: false }).waitFor()
     await page.waitForFunction(async () => (await window.gcpshot.getShortcutInfo()).suggestions.liveColorShortcut.length > 0)

@@ -10,7 +10,10 @@ export function shortcutCandidates(platform: string, key: GlobalShortcutKey): st
 
 export function canonicalShortcut(value: string): string {
   const aliases: Record<string, string> = { control: 'Ctrl', ctrl: 'Ctrl', shift: 'Shift', alt: 'Alt', option: 'Alt', meta: 'Super', super: 'Super', cmd: 'Command', command: 'Command', commandorcontrol: 'CommandOrControl', cmdorctrl: 'CommandOrControl', escape: 'Esc', esc: 'Esc', enter: 'Return', return: 'Return', printscreen: 'PrintScreen', space: 'Space', backspace: 'Backspace', delete: 'Delete', tab: 'Tab', up: 'Up', down: 'Down', left: 'Left', right: 'Right', home: 'Home', end: 'End', pageup: 'PageUp', pagedown: 'PageDown' }
-  return value.trim().split('+').map((part) => aliases[part.trim().toLowerCase()] ?? part.trim().toUpperCase()).join('+')
+  const parts = value.trim().split('+').map((part) => aliases[part.trim().toLowerCase()] ?? part.trim().toUpperCase())
+  const key = parts.pop() ?? ''
+  const order = ['CommandOrControl', 'Command', 'Ctrl', 'Super', 'Alt', 'Shift']
+  return [...parts.sort((a, b) => order.indexOf(a) - order.indexOf(b)), key].join('+')
 }
 
 export function shortcutIdentity(value: string, platform: string): string {
