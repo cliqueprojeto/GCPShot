@@ -1,8 +1,8 @@
 import { app, net, shell } from 'electron'
 import { createReadStream, createWriteStream, existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { mkdir, rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { basename, join } from 'node:path'
 import { execFile, spawn } from 'node:child_process'
 import { UPDATE_REPOSITORY, compareVersions, isPrereleaseVersion, matchUpdateAsset, parseReleaseFeedTags, type LinuxPackageKind, type UpdateManifest, type UpdateStatus } from '../shared/updates'
 
@@ -124,13 +124,18 @@ async function sha256(file: string): Promise<string> {
 }
 
 async function download(target: Candidate): Promise<string> {
-  const directory = join(app.getPath('temp'), 'gcpshot-update')
-  await mkdir(directory, { recursive: true })
-  const file = join(directory, target.asset.name)
+  // Private, unpredictable directory inside the user's profile (never the shared /tmp): the package may later be
+  // installed as root, so no other local account may be able to pre-create, swap or symlink it.
+  const root = join(app.getPath('userData'), 'updates')
+  await rm(root, { recursive: true, force: true }).catch(() => {}) // previous downloads
+  await mkdir(root, { recursive: true, mode: 0o700 })
+  const directory = await mkdtemp(join(root, 'download-'))
+  await chmod(directory, 0o700).catch(() => {})
+  const file = join(directory, basename(target.asset.name))
   const response = await net.fetch(target.asset.url, { headers })
   if (!response.ok || !response.body) throw new Error(`Falha ao baixar a atualização (HTTP ${response.status}).`)
   const total = Number(response.headers.get('content-length')) || target.asset.size
-  const output = createWriteStream(file)
+  const output = createWriteStream(file, { flags: 'wx', mode: 0o600 })
   const reader = response.body.getReader()
   let received = 0, lastReport = 0
   try {
@@ -168,7 +173,7 @@ async function installLinux(file: string): Promise<void> {
   if (kind === 'pacman') return privileged('pacman', ['-U', '--noconfirm', file])
   if (kind === 'rpm') {
     if (await run('which', ['dnf'])) return privileged('dnf', ['install', '-y', file])
-    if (await run('which', ['zypper'])) return privileged('zypper', ['--non-interactive', '--no-gpg-checks', 'install', file])
+    if (await run('which', ['zypper'])) return privileged('zypper', ['--non-interactive', 'install', '--allow-unsigned-rpm', file])
     return privileged('rpm', ['-U', '--replacepkgs', file])
   }
   if (await run('which', ['apt-get'])) return privileged('apt-get', ['install', '-y', '--allow-downgrades', file])
@@ -190,6 +195,12 @@ export async function downloadAndInstall(): Promise<boolean> {
     if (process.platform === 'darwin') {
       await shell.openPath(downloadedFile)
       publish({ state: 'ready', message: 'Arraste o GCPShot para a pasta Aplicativos e substitua a versão anterior. Depois reabra o app.' })
+      return false
+    }
+    if (!candidate.asset.sha256) {
+      // Without a published hash (REST API fallback) we never run the package as administrator automatically.
+      shell.showItemInFolder(downloadedFile)
+      publish({ state: 'ready', message: 'Pacote baixado sem assinatura SHA-256 publicada. Por segurança, instale-o manualmente pela pasta aberta.' })
       return false
     }
     try {

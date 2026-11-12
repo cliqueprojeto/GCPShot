@@ -1,7 +1,7 @@
 import { app, nativeImage, screen } from 'electron'
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -80,7 +80,9 @@ function cropToCursorDisplay(image: Electron.NativeImage): { image: Electron.Nat
 /** Captures the active monitor on Wayland without the screen-share picker. Returns null when no silent method works. */
 export async function silentLinuxScreenshot(): Promise<SilentShot | null> {
   if (!isWaylandSession) return null
-  const file = join(app.getPath('temp'), `gcpshot-shot-${process.pid}-${Date.now()}.png`)
+  // Private random directory under the user's profile: no other account can pre-create or symlink the target.
+  const directory = await mkdtemp(join(app.getPath('userData'), 'shot-'))
+  const file = join(directory, 'screen.png')
   try {
     let output = existsSync(linuxHelperPath()) ? await runHelper(['--screenshot', file]) : null
     let method = output?.match(/^OK (\w+) (\w+)/m)
@@ -90,5 +92,5 @@ export async function silentLinuxScreenshot(): Promise<SilentShot | null> {
     if (image.isEmpty()) return null
     if (method[2] === 'screen') return { image, display: displayForImage(image.getSize()), method: method[1] }
     return { ...cropToCursorDisplay(image), method: method[1] }
-  } finally { await rm(file, { force: true }).catch(() => {}) }
+  } finally { await rm(directory, { recursive: true, force: true }).catch(() => {}) }
 }
