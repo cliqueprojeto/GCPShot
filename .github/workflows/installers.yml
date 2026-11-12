@@ -79,7 +79,7 @@ jobs:
         run: xvfb-run -a node scripts/test-packaged.cjs
       - name: Test RPM installed on Fedora
         if: matrix.platform == 'linux'
-        run: docker run --rm --shm-size=1g -v "$PWD:/work" -w /work fedora:43 bash scripts/test-fedora-rpm.sh
+        run: docker run --rm --shm-size=1g -e GCPSHOT_DISABLE_UPDATES=1 -v "$PWD:/work" -w /work fedora:43 bash scripts/test-fedora-rpm.sh
       - name: Test packaged macOS application
         if: matrix.platform == 'mac'
         run: node scripts/test-packaged.cjs
@@ -116,7 +116,7 @@ jobs:
       - name: Install test runner
         run: npm install --no-save --package-lock=false playwright
       - name: Build and install native Arch / BigLinux package
-        run: docker run --rm --shm-size=1g -v "$PWD:/work" -w /work archlinux:base-devel bash scripts/build-test-arch.sh
+        run: docker run --rm --shm-size=1g -e GCPSHOT_DISABLE_UPDATES=1 -v "$PWD:/work" -w /work archlinux:base-devel bash scripts/build-test-arch.sh
       - uses: actions/upload-artifact@v4
         with:
           name: GCPShot-BigLinux-x86_64
