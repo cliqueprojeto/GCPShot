@@ -15,6 +15,7 @@ const toHex = (value: number): string => value.toString(16).padStart(2, '0').toU
 export function LiveColorOverlay(): JSX.Element {
   const source = useRef<HTMLCanvasElement | null>(null)
   const loupe = useRef<HTMLCanvasElement | null>(null)
+  const panel = useRef<HTMLDivElement | null>(null)
   const [image, setImage] = useState<string | null>(null)
   const [pointer, setPointer] = useState<{ x: number; y: number } | null>(null)
   const [sample, setSample] = useState<Sample | null>(null)
@@ -97,7 +98,8 @@ export function LiveColorOverlay(): JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [sample])
 
-  const panelWidth = LOUPE + 24, panelHeight = LOUPE + 92
+  // Measure the real panel so it flips to the other side of the cursor instead of leaving the screen.
+  const panelWidth = panel.current?.offsetWidth || LOUPE + 120, panelHeight = panel.current?.offsetHeight || LOUPE + 92
   const left = pointer ? (pointer.x + 28 + panelWidth > window.innerWidth ? pointer.x - 28 - panelWidth : pointer.x + 28) : 0
   const top = pointer ? (pointer.y + 28 + panelHeight > window.innerHeight ? pointer.y - 28 - panelHeight : pointer.y + 28) : 0
 
@@ -115,7 +117,7 @@ export function LiveColorOverlay(): JSX.Element {
       {image && <img className="live-color-frame" src={image} alt="" draggable={false} />}
       {!image && <p className="live-color-loading">Preparando a amostragem…</p>}
       {pointer && image && (
-        <div className="live-color-panel" style={{ left: Math.max(8, left), top: Math.max(8, top) }} aria-live="polite">
+        <div ref={panel} className="live-color-panel" style={{ left: Math.max(8, Math.min(left, window.innerWidth - panelWidth - 8)), top: Math.max(8, Math.min(top, window.innerHeight - panelHeight - 8)) }} aria-live="polite">
           <canvas ref={loupe} width={LOUPE} height={LOUPE} />
           <div className="live-color-readout">
             <span className="live-color-swatch" style={{ background: sample?.hex }} />

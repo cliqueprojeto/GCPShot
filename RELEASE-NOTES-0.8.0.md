@@ -29,6 +29,11 @@ Desenvolvido por **Bruno Albertini** · Gestão Cultural Pro
 
 - No Wayland, o Live Color mostra a cor **dinamicamente sob o mouse**, com lupa ampliada (grade de pixels), HEX e RGB atualizados a cada movimento.
 - **Setas** movem 1 pixel (Shift+setas: 10 px) para amostragem precisa. **Clique** ou **Enter** copia e salva no histórico. **Esc** ou o botão direito cancelam.
+- O painel da lupa muda de lado perto das bordas e nunca sai da tela.
+
+## Documentação
+
+- Novo README com todas as funcionalidades ilustradas, guia de instalação atualizado para Windows, macOS, Debian/Ubuntu, Fedora e Arch/BigLinux.
 
 ## Correções
 
