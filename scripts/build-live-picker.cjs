@@ -5,7 +5,7 @@ if (process.platform === 'darwin') {
   process.exit(0)
 }
 if (process.platform === 'linux') {
-  const flags = require('node:child_process').execFileSync('pkg-config', ['--cflags', '--libs', 'gtk+-3.0'], { encoding: 'utf8' }).trim().split(/\s+/)
+  const flags = require('node:child_process').execFileSync('pkg-config', ['--cflags', '--libs', 'gtk+-3.0', 'gio-unix-2.0'], { encoding: 'utf8' }).trim().split(/\s+/)
   execFileSync('gcc', ['-O2', '-Wall', '-Wextra', '-o', 'build/GCPShot.LiveColor', 'native/live-color-picker.c', ...flags], { stdio: 'inherit' })
   process.exit(0)
 }

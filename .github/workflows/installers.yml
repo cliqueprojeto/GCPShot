@@ -1,7 +1,8 @@
 name: Build Installers
 on:
   push:
-    branches: ['codex/cross-platform-installers']
+    branches: ['main', 'release/**']
+    tags: ['v*']
   workflow_dispatch:
 permissions:
   contents: read
@@ -25,6 +26,8 @@ jobs:
             arch: arm64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    env:
+      GCPSHOT_DISABLE_UPDATES: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -43,6 +46,15 @@ jobs:
       - name: Test Linux picker
         if: matrix.platform == 'linux'
         run: xvfb-run -a -s '-screen 0 1280x800x24 -noreset' node scripts/test-linux-picker.cjs
+      - name: Test Linux silent screenshot fallback
+        if: matrix.platform == 'linux'
+        run: |
+          set +e
+          dbus-run-session -- build/GCPShot.LiveColor --screenshot /tmp/gcpshot-shot.png
+          status=$?
+          set -e
+          # No KWin or portal on the runner: the helper must fail cleanly (exit 1) without hanging or crashing.
+          test "$status" -eq 1
       - name: Package installers
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -83,3 +95,58 @@ jobs:
             release/*.rpm
             release/*.exe
           if-no-files-found: error
+
+  arch:
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      GCPSHOT_DISABLE_UPDATES: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/download-artifact@v4
+        with:
+          name: GCPShot-linux-x64
+          path: release/linux-approved
+      - run: npm ci
+      - name: Install test runner
+        run: npm install --no-save --package-lock=false playwright
+      - name: Build and install native Arch / BigLinux package
+        run: docker run --rm --shm-size=1g -v "$PWD:/work" -w /work archlinux:base-devel bash scripts/build-test-arch.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GCPShot-BigLinux-x86_64
+          path: release/BigLinux/*.pkg.tar.zst
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, arch]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Create update manifest
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          notes="RELEASE-NOTES-${version}.md"
+          test -f "$notes"
+          node scripts/make-update-manifest.cjs artifacts "$GITHUB_REF_NAME" "$notes"
+          ls -la artifacts
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          flags=()
+          case "$version" in *-*) flags+=(--prerelease) ;; *) flags+=(--latest) ;; esac
+          gh release create "$GITHUB_REF_NAME" artifacts/* --title "GCPShot ${version}" --notes-file "RELEASE-NOTES-${version}.md" --verify-tag "${flags[@]}"

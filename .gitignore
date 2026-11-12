@@ -10,3 +10,4 @@ release/
 Thumbs.db
 build/GCPShot.LiveColor.exe
 build/GCPShot.LiveColor
+*.tsbuildinfo

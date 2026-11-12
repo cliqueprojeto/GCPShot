@@ -4,6 +4,7 @@ import type { StudioPickResult, StudioVideoPickResult } from '../shared/studio'
 import type { ColorLibrary, ColorResult } from '../shared/colors'
 import type { StoredCapture } from '../shared/studio'
 import type { ShortcutInfo } from '../shared/shortcuts'
+import type { UpdateStatus } from '../shared/updates'
 
 const api = {
   finishWelcome: (view: 'home' | 'studio' | 'colors'): Promise<void> => ipcRenderer.invoke('app:welcome-finish', view),
@@ -42,6 +43,21 @@ const api = {
     ipcRenderer.invoke('capture:print', payload),
   shareWhatsApp: (payload: CaptureExportPayload): Promise<CaptureResult> =>
     ipcRenderer.invoke('capture:share-whatsapp', payload),
+  getUpdateStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:status'),
+  checkForUpdates: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:check'),
+  installUpdate: (): Promise<void> => ipcRenderer.invoke('updates:install'),
+  openReleasePage: (): Promise<void> => ipcRenderer.invoke('updates:open-release'),
+  onUpdateStatus: (callback: (status: UpdateStatus) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: UpdateStatus): void => callback(status)
+    ipcRenderer.on('updates:status', listener)
+    return () => ipcRenderer.removeListener('updates:status', listener)
+  },
+  finishLiveColor: (hex: string | null): void => ipcRenderer.send('livecolor:finish', hex),
+  onLiveColorImage: (callback: (payload: { dataUrl: string; width: number; height: number }) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { dataUrl: string; width: number; height: number }): void => callback(payload)
+    ipcRenderer.on('livecolor:image', listener)
+    return () => ipcRenderer.removeListener('livecolor:image', listener)
+  },
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
   getShortcutInfo: (): Promise<ShortcutInfo> => ipcRenderer.invoke('settings:shortcut-info'),
   setShortcutEditing: (enabled: boolean): Promise<void> => ipcRenderer.invoke('settings:shortcut-editing', enabled),

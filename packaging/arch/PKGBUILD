@@ -1,5 +1,6 @@
 pkgname=gcpshot
-pkgver=0.7.0
+_debver=0.8.0
+pkgver=0.8.0
 pkgrel=1
 pkgdesc='GCPShot - captura de tela, Color Lab e estudio de imagem'
 arch=('x86_64')
@@ -11,11 +12,12 @@ depends=('alsa-lib' 'at-spi2-core' 'cairo' 'dbus' 'desktop-file-utils'
          'libxdamage' 'libxext' 'libxfixes' 'libxkbcommon' 'libxrandr'
          'libxss' 'libxtst' 'mesa' 'nspr' 'nss' 'pango' 'systemd-libs' 'xdg-utils')
 optdepends=('xdg-desktop-portal: Captura e atalhos em sessoes Wayland'
+            'grim: Captura silenciosa em compositores wlroots (Sway, Hyprland)'
             'xdg-desktop-portal-kde: Integracao com Plasma e BigLinux')
 options=('!strip' '!debug')
-source=("GCPShot-${pkgver}-Linux-amd64.deb")
+source=("GCPShot-${_debver}-Linux-amd64.deb")
 noextract=("${source[0]}")
-sha256sums=('4a4968b536021c8cc997ec0646f7e86cb1ed59b0a85d2163d05023ebb9582f90')
+sha256sums=('SKIP')
 
 prepare() {
   mkdir -p "$srcdir/deb"

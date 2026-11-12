@@ -7,6 +7,7 @@ import { ActionIcon, ToolIcon, type EditorTool } from './icons'
 import { Settings2, Keyboard, FileImage, X } from 'lucide-react'
 import type { GlobalShortcutKey, ShortcutInfo } from '../shared/shortcuts'
 import { globalShortcutKeys } from '../shared/shortcuts'
+import { UpdatesSection } from './UpdatesSection'
 import './settings.css'
 
 export type SettingsTab = 'general' | 'shortcuts' | 'formats' | 'video' | 'audio'
@@ -16,8 +17,6 @@ type ShortcutField = {
   labelKey: TranslationKey
   icon?: EditorTool | 'copy' | 'save' | 'print' | 'whatsapp' | 'undo' | 'redo' | 'close'
 }
-
-const shortcutOptions = ['Alt+Shift+S', 'Ctrl+Shift+S', 'Alt+Q', 'Ctrl+Alt+S']
 
 const shortcutFields: ShortcutField[] = [
   { key: 'captureShortcut', labelKey: 'shortcutCapture', icon: 'select' },
@@ -146,6 +145,8 @@ export function SettingsPanel({
     finally { setSavingShortcut(false) }
   }
 
+  const mainOptions = useMemo(() => [...new Set([settings.captureShortcut, ...(shortcutInfo?.suggestions.captureShortcut ?? [])])], [settings.captureShortcut, shortcutInfo])
+
   const tabs = useMemo(
     () =>
       [
@@ -225,26 +226,33 @@ export function SettingsPanel({
               />
               <span>{t(language, 'captureCursor')}</span>
             </label>
+            <UpdatesSection settings={settings} onUpdateSetting={onUpdateSetting} />
           </div>
         )}
 
         {settingsTab === 'shortcuts' && (
           <>
-            <p className="settings-hint">Sistema detectado: {shortcutInfo?.platform ?? '…'}. {shortcutInfo?.portal ? 'Atalhos dependem da autorizacao do portal Wayland.' : 'Sugestoes verificadas nesta sessao; outros aplicativos podem reservar teclas depois.'}</p>
+            <p className="settings-hint">
+              Sistema detectado: {shortcutInfo?.platform ?? '…'}.{' '}
+              {shortcutInfo?.reservedCount ? `${shortcutInfo.reservedCount} atalhos do ${shortcutInfo.desktop || 'sistema'} foram lidos e excluidos das sugestoes. ` : ''}
+              {shortcutInfo?.portal
+                ? 'No Wayland o sistema pode pedir uma confirmacao unica para liberar os atalhos do GCPShot.'
+                : 'As sugestoes abaixo foram testadas agora e estao livres neste computador.'}
+            </p>
             {shortcutInfo?.issues.map((issue) => <p className="settings-hint" key={issue}>{issue}</p>)}
             {shortcutError && <p role="alert" className="shortcut-error">{shortcutError}</p>}
             <div className="settings-grid">
               <label>
                 <span>{t(language, 'mainShortcut')}</span>
                 <select
-                  value={shortcutOptions.includes(settings.captureShortcut) ? settings.captureShortcut : 'custom'}
+                  value={mainOptions.includes(settings.captureShortcut) ? settings.captureShortcut : 'custom'}
                   onChange={(event) => {
                     if (event.currentTarget.value !== 'custom') {
                       void commitShortcut('captureShortcut', event.currentTarget.value)
                     }
                   }}
                 >
-                  {shortcutOptions.map((shortcut) => (
+                  {mainOptions.map((shortcut) => (
                     <option key={shortcut} value={shortcut}>
                       {shortcut}
                     </option>
@@ -335,7 +343,7 @@ export function SettingsPanel({
                     </button>
                     <button type="button" disabled={savingShortcut} aria-label={`Salvar atalho ${t(language, field.labelKey)}`} onClick={() => void commitShortcut(field.key, displayShortcut(field.key))}>Salvar</button>
                   </div>
-                  {globalShortcutKeys.includes(field.key as GlobalShortcutKey) && <select aria-label={`Sugestoes ${t(language, field.labelKey)}`} value="" disabled={savingShortcut} onChange={(event) => { if (event.target.value) void commitShortcut(field.key, event.target.value) }}><option value="">Sugestoes disponiveis</option>{shortcutInfo?.suggestions[field.key as GlobalShortcutKey]?.map((value) => <option value={value} key={value}>{value}</option>)}</select>}
+                  {globalShortcutKeys.includes(field.key as GlobalShortcutKey) && <select aria-label={`Sugestoes ${t(language, field.labelKey)}`} value="" disabled={savingShortcut} onChange={(event) => { if (event.target.value) void commitShortcut(field.key, event.target.value) }}><option value="">{shortcutInfo ? `Sugestoes livres (${shortcutInfo.suggestions[field.key as GlobalShortcutKey]?.length ?? 0})` : 'Verificando teclas livres…'}</option>{shortcutInfo?.suggestions[field.key as GlobalShortcutKey]?.map((value) => <option value={value} key={value}>{value}</option>)}</select>}
                 </label>
               ))}
             </div>

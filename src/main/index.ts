@@ -17,13 +17,17 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { mkdirSync, writeFileSync, existsSync, unlinkSync } from 'node:fs'
 import { extname, join, basename } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
-import type { AppSettings, CaptureExportPayload, CaptureMode, CaptureRect, CaptureResult, RecordMode } from '../shared/capture'
+import type { AppSettings, CaptureExportPayload, CaptureMode, CaptureSegment, CaptureRect, CaptureResult, RecordMode } from '../shared/capture'
 import { defaultAppSettings } from '../shared/capture'
 import { normalizeHex, parseLibrary, type ColorResult } from '../shared/colors'
 import { getColorLibrary, loadColorLibrary, saveColorLibrary } from './colorLibrary'
 import { getStoredCaptures, removeStoredCapture, storeCapture } from './captureStore'
+import type { UpdateStatus } from '../shared/updates'
 import { DEVELOPER_CREDIT, GCP_SITE_URL, ORGANIZATION_NAME, isProjectSiteUrl } from '../shared/branding'
-import { canonicalShortcut, globalShortcutKeys, shortcutCandidates, shortcutIdentity, validGlobalShortcut, type ShortcutInfo } from '../shared/shortcuts'
+import { authorizeKwinScreenshots, isWaylandSession, silentLinuxScreenshot } from './linuxCapture'
+import { readDesktopShortcuts, type DesktopShortcuts } from './desktopShortcuts'
+import { checkForUpdates, downloadAndInstall, getUpdateStatus, onUpdateStatus, setLastCheck } from './updater'
+import { canonicalShortcut, globalShortcutKeys, shortcutCandidates, shortcutIdentity, validGlobalShortcut, type GlobalShortcutKey, type ShortcutInfo } from '../shared/shortcuts'
 
 type MainView = 'home' | 'studio' | 'colors' | 'palettes'
 
@@ -35,6 +39,7 @@ let settings: AppSettings
 let isQuitting = false
 let colorPickerProcess: ChildProcess | null = null
 let colorToastWindow: BrowserWindow | null = null
+let liveColorWindow: BrowserWindow | null = null
 let colorToastTimer: ReturnType<typeof setTimeout> | null = null
 let toastDestination: 'colors' | 'studio' | 'home' = 'colors'
 let showWelcome = false
@@ -43,6 +48,9 @@ let pendingLaunchArgs: string[] | null = null
 const shortcutEditors = new Set<number>()
 const shortcutEditorOwners = new Set<number>()
 let shortcutIssues: string[] = []
+let desktopShortcuts: DesktopShortcuts = { desktop: 'other', label: '', reserved: new Set() }
+const reservedByDesktop = (value: string): boolean => desktopShortcuts.reserved.has(shortcutIdentity(value, process.platform))
+const availableCandidates = (key: GlobalShortcutKey): string[] => shortcutCandidates(process.platform, key).filter((value) => !reservedByDesktop(value))
 let settingsQueue: Promise<unknown> = Promise.resolve()
 
 const isDev = Boolean(process.env.ELECTRON_RENDERER_URL)
@@ -100,7 +108,7 @@ function normalizeSettingsShortcuts(nextSettings: AppSettings): AppSettings {
   shortcutKeys.forEach((key) => {
     const value = nextSettings[key]
     if (typeof value === 'string') {
-      ;(nextSettings as Record<string, string>)[key] = normalizeAccelerator(value)
+      ;(nextSettings as unknown as Record<string, string>)[key] = normalizeAccelerator(value)
     }
   })
 
@@ -113,9 +121,20 @@ async function loadSettings(): Promise<AppSettings> {
     return normalizeSettingsShortcuts({ ...defaultSettings, ...JSON.parse(file) })
   } catch {
     const defaults = { ...defaultSettings }
-    for (const key of globalShortcutKeys) defaults[key] = shortcutCandidates(process.platform, key)[0]
+    for (const key of globalShortcutKeys) defaults[key] = firstFreeShortcut(key, defaults)
     return defaults
   }
+}
+
+/** Picks the easiest candidate that the OS has not reserved and that no other GCPShot action already uses. */
+function firstFreeShortcut(key: GlobalShortcutKey, current: AppSettings): string {
+  const taken = new Set(globalShortcutKeys.filter((other) => other !== key).map((other) => shortcutIdentity(current[other], process.platform)))
+  const options = availableCandidates(key).filter((value) => !taken.has(shortcutIdentity(value, process.platform)))
+  for (const value of options) {
+    if (isWaylandSession || globalShortcut.isRegistered(value)) return value
+    try { if (globalShortcut.register(value, () => {})) { globalShortcut.unregister(value); return value } } catch { /* reserved */ }
+  }
+  return options[0] ?? shortcutCandidates(process.platform, key)[0]
 }
 
 function normalizeAccelerator(accelerator: string): string {
@@ -363,14 +382,16 @@ function handleLinuxLaunch(argv: string[]): void {
 
 async function beginLiveColor(): Promise<ColorResult> {
   if (captureWindows.length) return { ok: false, error: 'Conclua a captura antes de iniciar o Live Color.' }
-  if (colorPickerProcess) return { ok: false, error: 'O Live Color ja esta ativo.' }
+  if (colorPickerProcess || liveColorWindow) return { ok: false, error: 'O Live Color ja esta ativo.' }
   const wasVisible = Boolean(mainWindow?.isVisible())
   try {
     closeColorToast()
     mainWindow?.hide()
     const helper = process.platform === 'win32' ? 'GCPShot.LiveColor.exe' : 'GCPShot.LiveColor'
     const executable = app.isPackaged ? join(process.resourcesPath, helper) : join(__dirname, '../../build', helper)
-    const value = await new Promise<string | null>((resolve, reject) => {
+    // Wayland forbids reading screen pixels live: sample a silent capture of the active monitor instead.
+    const frozen = isWaylandSession ? await pickColorFromSilentShot(wasVisible) : undefined
+    const value = frozen !== undefined ? frozen : await new Promise<string | null>((resolve, reject) => {
       const child = spawn(executable, [String(process.pid)], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...(process.platform === 'linux' ? { GDK_SCALE: '1', GDK_DPI_SCALE: '1' } : {}) } })
       colorPickerProcess = child
       let output = '', error = ''
@@ -405,6 +426,48 @@ async function beginLiveColor(): Promise<ColorResult> {
     colorPickerProcess = null
     if (!isQuitting && wasVisible && mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus() }
   }
+}
+
+/** Opens the real-time magnifier over a silent capture. Resolves undefined when no silent capture is possible. */
+async function pickColorFromSilentShot(wasVisible: boolean): Promise<string | null | undefined> {
+  if (wasVisible) await new Promise((resolve) => setTimeout(resolve, 220))
+  const shot = await silentLinuxScreenshot()
+  if (!shot) return undefined
+  const { display, image } = shot
+  const size = image.getSize()
+  return new Promise((resolve) => {
+    const window = new BrowserWindow({
+      ...display.bounds, frame: false, fullscreen: true, show: false, resizable: false, movable: false,
+      alwaysOnTop: true, skipTaskbar: true, backgroundColor: '#000000', title: 'GCPShot Live Color', icon: getAppIcon(),
+      webPreferences: { preload: join(__dirname, '../preload/index.js'), contextIsolation: true, nodeIntegration: false, sandbox: false }
+    })
+    liveColorWindow = window
+    let settled = false
+    const timeout = setTimeout(() => finish(null), 120_000)
+    function finish(hex: string | null): void {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      ipcMain.removeListener('livecolor:finish', onFinish)
+      liveColorWindow = null
+      if (!window.isDestroyed()) window.destroy()
+      resolve(hex)
+    }
+    function onFinish(event: Electron.IpcMainEvent, hex: unknown): void {
+      if (window.isDestroyed() || event.sender !== window.webContents) return
+      finish(typeof hex === 'string' && /^#[0-9A-F]{6}$/i.test(hex) ? hex.toUpperCase() : null)
+    }
+    ipcMain.on('livecolor:finish', onFinish)
+    window.on('closed', () => finish(null))
+    window.setMenu(null)
+    window.webContents.once('did-finish-load', () => window.webContents.send('livecolor:image', { dataUrl: image.toDataURL(), width: size.width, height: size.height }))
+    window.once('ready-to-show', () => { window.show(); window.setAlwaysOnTop(true, 'screen-saver'); window.focus() })
+    if (isDev && process.env.ELECTRON_RENDERER_URL) {
+      const url = new URL(process.env.ELECTRON_RENDERER_URL)
+      url.searchParams.set('livecolor', '1')
+      void window.loadURL(url.toString())
+    } else void window.loadFile(join(__dirname, '../renderer/index.html'), { query: { livecolor: '1' } })
+  })
 }
 
 function closeColorToast(): void {
@@ -477,6 +540,7 @@ function createTray(): void {
       { label: 'Live Color', icon: trayMenuIcon('live'), accelerator: settings.liveColorShortcut, registerAccelerator: false, click: () => void beginLiveColor().then((result) => { if (result.error) notify('Live Color', result.error) }) },
       { type: 'separator' },
       { label: 'Configurações', icon: trayMenuIcon('settings'), click: openSettingsWindow },
+      { label: 'Verificar atualizações', icon: trayMenuIcon('about'), click: () => void runUpdateCheck(true) },
       { label: 'Sobre', icon: trayMenuIcon('about'), click: () => void showAboutDialog().catch((error) => console.error('GCPShot: não foi possível abrir Sobre.', error)) },
       {
         label: process.platform === 'win32' ? 'Iniciar com o Windows' : 'Iniciar com o sistema',
@@ -505,15 +569,31 @@ function trayMenuIcon(name: string): Electron.NativeImage {
 }
 
 async function beginOverlay(mode: CaptureMode, overlay: 'capture' | 'record', autoCopy = false): Promise<CaptureResult> {
-  if (colorPickerProcess) return { ok: false, error: 'Conclua o Live Color ou pressione Esc antes de capturar.' }
+  if (colorPickerProcess || liveColorWindow) return { ok: false, error: 'Conclua o Live Color ou pressione Esc antes de capturar.' }
   closeColorToast()
   if (captureWindows.length > 0) {
     captureWindows[0]?.focus()
     return { ok: true }
   }
 
+  const mainWasVisible = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible())
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.hide()
+  }
+
+  // Wayland: capture the monitor under the mouse silently (KWin/portal) instead of the screen-share picker.
+  if (isWaylandSession && overlay === 'capture') {
+    if (mainWasVisible) await new Promise((resolve) => setTimeout(resolve, 220))
+    const shot = await silentLinuxScreenshot()
+    if (shot) {
+      const { display, image } = shot
+      const size = image.getSize()
+      return openOverlayWindow(mode, overlay, autoCopy, [{
+        dataUrl: image.toDataURL(), x: 0, y: 0, width: display.bounds.width, height: display.bounds.height,
+        displayId: display.id, label: display.label || 'Monitor', scaleFactor: size.width / display.bounds.width,
+        pixelWidth: size.width, pixelHeight: size.height, isPrimary: display.id === screen.getPrimaryDisplay().id, screenSourceId: ''
+      }], display.bounds, size.width / display.bounds.width, '', true)
+    }
   }
 
   const displays = screen.getAllDisplays()
@@ -569,13 +649,27 @@ async function beginOverlay(mode: CaptureMode, overlay: 'capture' | 'record', au
   })
   if (!segments.length) return { ok: false, error: 'Não foi possível identificar a tela autorizada. Verifique a permissão de captura do sistema.' }
 
+  return openOverlayWindow(mode, overlay, autoCopy, segments, { x: minX, y: minY, width: desktopWidth, height: desktopHeight }, maxScale, primarySourceId, false)
+}
+
+function openOverlayWindow(
+  mode: CaptureMode,
+  overlay: 'capture' | 'record',
+  autoCopy: boolean,
+  segments: CaptureSegment[],
+  bounds: Electron.Rectangle,
+  maxScale: number,
+  primarySourceId: string,
+  fullscreen: boolean
+): CaptureResult {
+  const { x: minX, y: minY, width: desktopWidth, height: desktopHeight } = bounds
   const window = new BrowserWindow({
     x: minX,
     y: minY,
     width: desktopWidth,
     height: desktopHeight,
     frame: false,
-    fullscreen: false,
+    fullscreen,
     resizable: false,
     movable: false,
     transparent: overlay === 'record',
@@ -669,6 +763,14 @@ function imageFromExportPayload(payload: CaptureExportPayload): Electron.NativeI
   return cropCapture(payload.dataUrl, payload.rect, payload.display)
 }
 
+function saveDialog(owner: BrowserWindow | null, options: Electron.SaveDialogOptions): Promise<Electron.SaveDialogReturnValue> {
+  return owner && !owner.isDestroyed() ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
+}
+
+function openDialog(owner: BrowserWindow | null, options: Electron.OpenDialogOptions): Promise<Electron.OpenDialogReturnValue> {
+  return owner && !owner.isDestroyed() ? dialog.showOpenDialog(owner, options) : dialog.showOpenDialog(options)
+}
+
 function closeCaptureWindow(): void {
   captureWindows.forEach((window) => {
     if (!window.isDestroyed()) {
@@ -748,7 +850,7 @@ function registerIpc(): void {
     async (_event, buffer: ArrayBuffer, meta?: { extension?: string }): Promise<CaptureResult> => {
     const extension = meta?.extension === 'mp4' ? 'mp4' : 'webm'
     const filterName = extension === 'mp4' ? 'Vídeo MP4 (H.264)' : 'Vídeo WebM'
-    const { canceled, filePath } = await dialog.showSaveDialog(captureWindow ?? mainWindow ?? undefined, {
+    const { canceled, filePath } = await saveDialog(captureWindow ?? mainWindow, {
       title: 'Salvar gravação',
       defaultPath: `GCPShot-${new Date().toISOString().replace(/[:.]/g, '-')}.${extension}`,
       filters: [{ name: filterName, extensions: [extension] }]
@@ -788,7 +890,7 @@ function registerIpc(): void {
         const image = imageFromExportPayload(payload)
         if (image.isEmpty()) return { ok: false, error: 'Não foi possível compor a captura.' }
         const extension = settings.defaultFormat
-        const { canceled, filePath } = await dialog.showSaveDialog(captureWindow ?? mainWindow ?? undefined, {
+        const { canceled, filePath } = await saveDialog(captureWindow ?? mainWindow, {
           title: 'Salvar captura',
           defaultPath: `GCPShot-${new Date().toISOString().replace(/[:.]/g, '-')}.${extension}`,
           filters: [
@@ -899,6 +1001,13 @@ function registerIpc(): void {
       return { ok: true }
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : 'Não foi possível abrir o WhatsApp Web.' } }
   })
+  ipcMain.handle('updates:status', () => getUpdateStatus())
+  ipcMain.handle('updates:check', () => runUpdateCheck(false))
+  ipcMain.handle('updates:install', () => installUpdateAndQuit())
+  ipcMain.handle('updates:open-release', () => {
+    const url = getUpdateStatus().releaseUrl
+    if (url?.startsWith('https://github.com/')) void shell.openExternal(url)
+  })
   ipcMain.handle('settings:get', () => settings)
   ipcMain.handle('settings:shortcut-info', () => shortcutInfo())
   ipcMain.handle('settings:shortcut-editing', (event, enabled: boolean) => {
@@ -920,7 +1029,7 @@ function registerIpc(): void {
   })
   ipcMain.handle('settings:reset', async (): Promise<AppSettings> => {
     const defaults = { ...defaultSettings }
-    for (const key of globalShortcutKeys) defaults[key] = shortcutCandidates(process.platform, key)[0]
+    for (const key of globalShortcutKeys) defaults[key] = firstFreeShortcut(key, defaults)
     return updateSettings(defaults)
   })
   ipcMain.handle('window:show-main', () => {
@@ -933,7 +1042,7 @@ function registerIpc(): void {
     openStudioWindow()
   })
   ipcMain.handle('studio:pick-images', async (): Promise<{ ok: boolean; files: Array<{ name: string; dataUrl: string; width: number; height: number }>; error?: string }> => {
-    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow ?? undefined, {
+    const { canceled, filePaths } = await openDialog(mainWindow, {
       title: 'Importar imagens para o estúdio',
       properties: ['openFile', 'multiSelections'],
       filters: [{ name: 'Imagens', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]
@@ -964,7 +1073,7 @@ function registerIpc(): void {
     return { ok: true, files }
   })
   ipcMain.handle('studio:export-image', async (_event, dataUrl: string): Promise<CaptureResult> => {
-    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow ?? undefined, {
+    const { canceled, filePath } = await saveDialog(mainWindow, {
       title: 'Exportar imagem do estúdio',
       defaultPath: `GCPShot-Studio-${new Date().toISOString().replace(/[:.]/g, '-')}.png`,
       filters: [{ name: 'Imagem PNG', extensions: ['png'] }]
@@ -980,7 +1089,7 @@ function registerIpc(): void {
     return { ok: true, path: filePath }
   })
   ipcMain.handle('studio:pick-videos', async (): Promise<{ ok: boolean; files: Array<{ name: string; dataUrl: string; mimeType: string }>; error?: string }> => {
-    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow ?? undefined, {
+    const { canceled, filePaths } = await openDialog(mainWindow, {
       title: 'Importar videos para o estudio',
       properties: ['openFile', 'multiSelections'],
       filters: [{ name: 'Videos', extensions: ['mp4', 'webm', 'mov', 'mkv'] }]
@@ -1014,7 +1123,7 @@ function registerIpc(): void {
     return { ok: true, files }
   })
   ipcMain.handle('studio:export-video-project', async (_event, project: string): Promise<CaptureResult> => {
-    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow ?? undefined, {
+    const { canceled, filePath } = await saveDialog(mainWindow, {
       title: 'Exportar projeto de video',
       defaultPath: `GCPShot-Video-Studio-${new Date().toISOString().replace(/[:.]/g, '-')}.gcpshot-video.json`,
       filters: [{ name: 'Projeto de video GCPShot', extensions: ['json'] }]
@@ -1041,7 +1150,8 @@ function registerShortcuts(next = settings, recover = true): void {
   try {
     for (const key of globalShortcutKeys) {
       const requested = canonicalShortcut(next[key])
-      const options = recover ? [requested, ...shortcutCandidates(process.platform, key)] : [requested]
+      if (!recover && reservedByDesktop(requested)) throw new Error(`${requested} ja e usado pelo ${desktopShortcuts.label || 'sistema'}. Escolha uma das sugestoes disponiveis.`)
+      const options = recover ? [requested, ...availableCandidates(key)].filter((value) => !reservedByDesktop(value)) : [requested]
       let chosen = ''
       for (const value of [...new Set(options)]) {
         const identity = shortcutIdentity(value, process.platform)
@@ -1059,8 +1169,11 @@ function registerShortcuts(next = settings, recover = true): void {
     }
     if (next.printScreenShortcut) {
       let registered = false
-      try { registered = globalShortcut.register('PrintScreen', () => void beginCapture('region', true)) } catch { /* Reserved by the system. */ }
-      if (!registered) issues.push('Print Screen esta reservado pelo sistema; use o atalho de captura.')
+      if (reservedByDesktop('PrintScreen')) issues.push(`Print Screen ja abre a ferramenta de captura do ${desktopShortcuts.label || 'sistema'}; use o atalho de captura do GCPShot.`)
+      else {
+        try { registered = globalShortcut.register('PrintScreen', () => void beginCapture('region', true)) } catch { /* Reserved by the system. */ }
+        if (!registered) issues.push('Print Screen esta reservado pelo sistema; use o atalho de captura.')
+      }
     }
     shortcutIssues = issues
   } finally {
@@ -1068,12 +1181,13 @@ function registerShortcuts(next = settings, recover = true): void {
   }
 }
 
-function shortcutInfo(): ShortcutInfo {
+async function shortcutInfo(): Promise<ShortcutInfo> {
+  if (process.platform === 'linux') desktopShortcuts = await readDesktopShortcuts().catch(() => desktopShortcuts)
   const suggestions = {} as ShortcutInfo['suggestions']
-  // Wayland portal registration is asynchronous and consent-gated: never probe it.
-  const portal = process.platform === 'linux' && process.env.XDG_SESSION_TYPE === 'wayland'
+  // Wayland portal registration is asynchronous and consent-gated: never probe it, rely on the desktop's own config.
+  const portal = isWaylandSession
   for (const key of globalShortcutKeys) {
-    suggestions[key] = shortcutCandidates(process.platform, key).filter((value) => {
+    suggestions[key] = availableCandidates(key).filter((value) => {
       if (globalShortcutKeys.some((other) => other !== key && shortcutIdentity(settings[other], process.platform) === shortcutIdentity(value, process.platform))) return false
       if (portal || globalShortcut.isRegistered(value)) return true
       try {
@@ -1083,7 +1197,9 @@ function shortcutInfo(): ShortcutInfo {
       } catch { return false }
     })
   }
-  return { platform: process.platform === 'darwin' ? `macOS ${process.arch === 'arm64' ? 'Apple Silicon' : 'Intel'}` : process.platform === 'win32' ? 'Windows' : 'Linux', suggestions, issues: shortcutIssues, portal }
+  const session = isWaylandSession ? 'Wayland' : 'X11'
+  const platform = process.platform === 'darwin' ? `macOS ${process.arch === 'arm64' ? 'Apple Silicon' : 'Intel'}` : process.platform === 'win32' ? 'Windows' : `Linux (${desktopShortcuts.label ? `${desktopShortcuts.label}, ` : ''}${session})`
+  return { platform, desktop: desktopShortcuts.label, suggestions, issues: shortcutIssues, portal, reservedCount: desktopShortcuts.reserved.size }
 }
 
 function updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
@@ -1107,9 +1223,54 @@ function updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
   return operation
 }
 
+async function runUpdateCheck(interactive: boolean): Promise<UpdateStatus> {
+  const result = await checkForUpdates(settings.includePrereleases)
+  if (result.lastCheck && result.lastCheck !== settings.lastUpdateCheck) void updateSettings({ lastUpdateCheck: result.lastCheck }).catch(() => {})
+  if (result.state === 'available') void promptUpdate(result)
+  else if (interactive) notify('Atualizações', result.message || 'Verificação concluída.')
+  return result
+}
+
+let updatePromptOpen = false
+async function promptUpdate(update: UpdateStatus): Promise<void> {
+  if (updatePromptOpen) return
+  updatePromptOpen = true
+  try {
+    const options: Electron.MessageBoxOptions = {
+      type: 'info', title: 'Atualização do GCPShot', icon: getAppIcon(), noLink: true,
+      message: `GCPShot ${update.latestVersion}${update.prerelease ? ' (desenvolvimento)' : ''} está disponível`,
+      detail: `Versão instalada: ${update.currentVersion}.\n\n${(update.notes || '').replace(/[#*`>]/g, '').trim().slice(0, 900)}`,
+      buttons: ['Atualizar agora', 'Ver novidades', 'Depois'], defaultId: 0, cancelId: 2
+    }
+    const parent = mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() ? mainWindow : undefined
+    const { response } = await (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options))
+    if (response === 0) await installUpdateAndQuit().catch((error) => notify('Atualização', error instanceof Error ? error.message : 'Falha ao atualizar.'))
+    else if (response === 1 && update.releaseUrl) void shell.openExternal(update.releaseUrl)
+  } finally { updatePromptOpen = false }
+}
+
+async function installUpdateAndQuit(): Promise<void> {
+  if (await downloadAndInstall()) {
+    isQuitting = true
+    setTimeout(() => app.quit(), 400)
+  }
+}
+
+function scheduleAutomaticUpdateCheck(): void {
+  if (isDev || process.env.GCPSHOT_DISABLE_UPDATES === '1') return
+  const last = Date.parse(settings.lastUpdateCheck || '') || 0
+  const due = settings.updateCheckMode === 'startup' || (settings.updateCheckMode === 'daily' && Date.now() - last > 24 * 3600_000)
+  if (due) setTimeout(() => void runUpdateCheck(false), 6000)
+  if (settings.updateCheckMode !== 'manual') setInterval(() => {
+    const previous = Date.parse(settings.lastUpdateCheck || '') || 0
+    if (settings.updateCheckMode !== 'manual' && Date.now() - previous > 24 * 3600_000) void runUpdateCheck(false)
+  }, 3600_000)
+}
+
 app.whenReady().then(async () => {
   if (!ownsInstance) return
   if (process.platform === 'darwin') app.dock?.setIcon(getAppIcon())
+  if (process.platform === 'linux') desktopShortcuts = await readDesktopShortcuts().catch(() => desktopShortcuts)
   settings = await loadSettings()
   registerShortcuts(settings, true)
   await saveSettings(settings).catch((error) => console.error('GCPShot: nao foi possivel persistir os atalhos iniciais.', error))
@@ -1117,8 +1278,14 @@ app.whenReady().then(async () => {
   await loadColorLibrary()
 
   applyLoginItemSettings()
+  setLastCheck(settings.lastUpdateCheck)
+  onUpdateStatus((next) => {
+    for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('updates:status', next)
+  })
+  if (process.platform === 'linux') authorizeKwinScreenshots()
   registerIpc()
   createTray()
+  scheduleAutomaticUpdateCheck()
   nativeTheme.on('updated', createTray)
 
   if (!shouldStartHidden()) {
@@ -1137,6 +1304,7 @@ app.whenReady().then(async () => {
 app.on('before-quit', () => {
   isQuitting = true
   colorPickerProcess?.kill()
+  if (liveColorWindow && !liveColorWindow.isDestroyed()) liveColorWindow.destroy()
   closeColorToast()
   tray?.destroy()
   tray = null

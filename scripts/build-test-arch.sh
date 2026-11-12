@@ -5,8 +5,13 @@ mapfile -t dependencies < <(bash -c 'source /work/packaging/arch/PKGBUILD; print
 pacman -S --noconfirm --needed "${dependencies[@]}"
 useradd --create-home builder
 install -d -o builder -g builder /tmp/gcpshot-build
+deb=$(ls /work/release/linux-approved/GCPShot-*-Linux-amd64.deb | head -n1)
+test -f "$deb"
+debver=$(basename "$deb" | sed -E 's/^GCPShot-(.+)-Linux-amd64\.deb$/\1/')
+sha=$(sha256sum "$deb" | cut -d' ' -f1)
 install -m 644 -o builder -g builder /work/packaging/arch/PKGBUILD /tmp/gcpshot-build/PKGBUILD
-install -m 644 -o builder -g builder /work/release/linux-approved/GCPShot-0.7.0-Linux-amd64.deb /tmp/gcpshot-build/
+sed -i -E "s/^_debver=.*/_debver=${debver}/; s/^pkgver=.*/pkgver=${debver//-/_}/; s/^sha256sums=.*/sha256sums=('${sha}')/" /tmp/gcpshot-build/PKGBUILD
+install -m 644 -o builder -g builder "$deb" /tmp/gcpshot-build/
 runuser -u builder -- bash -c 'cd /tmp/gcpshot-build && makepkg --noconfirm'
 pacman -U --noconfirm /tmp/gcpshot-build/gcpshot-*.pkg.tar.zst
 pacman -Q gcpshot

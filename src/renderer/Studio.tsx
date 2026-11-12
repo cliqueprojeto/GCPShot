@@ -742,7 +742,7 @@ function StudioContent({ language, onBack, onOpenSettings }: Omit<StudioProps, '
       video.onseeked = () => resolve()
     })
 
-    const stream = video.captureStream()
+    const stream = (video as HTMLVideoElement & { captureStream: () => MediaStream }).captureStream()
     const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
       ? 'video/webm;codecs=vp9,opus'
       : 'video/webm'

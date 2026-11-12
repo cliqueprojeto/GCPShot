@@ -521,7 +521,7 @@ export function RecordOverlay(): JSX.Element {
       }
 
       if (webcamDrag) {
-        setWebcamPoint(clampWebcamPosition({ x: event.clientX - webcamDrag.x, y: event.clientY - webcamDrag.y }, settings.webcamSize))
+        setWebcamPoint(clampWebcamPosition({ x: event.clientX - webcamDrag.x, y: event.clientY - webcamDrag.y }, settings.webcamSize, { width: window.innerWidth, height: window.innerHeight }))
       }
     }
 
@@ -860,7 +860,7 @@ export function RecordOverlay(): JSX.Element {
       return
     }
 
-    setDraftAction({ ...draftAction, to: point })
+    if ('from' in draftAction) setDraftAction({ ...draftAction, to: point })
   }
 
   function onMouseUp(event: React.MouseEvent<HTMLDivElement>): void {
@@ -1108,7 +1108,7 @@ export function RecordOverlay(): JSX.Element {
         </div>
       )}
 
-      {phase === 'recording' || phase === 'paused' ? (
+      {phase === 'recording' || phase === 'paused' || phase === 'stopping' ? (
         <div
           ref={dockRef}
           className={phase === 'paused' ? 'record-dock record-dock-live paused' : 'record-dock record-dock-live'}

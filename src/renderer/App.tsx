@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AppSettings,
   CaptureAction,
+  ShapeAction,
   CaptureExportPayload,
   CaptureImagePayload,
   CaptureMode,
@@ -9,6 +10,7 @@ import type {
   CaptureSegment,
   SettingsShortcutKey
 } from '../shared/capture'
+import { LiveColorOverlay } from './LiveColorOverlay'
 import { defaultAppSettings } from '../shared/capture'
 import type { AppLanguage } from '../shared/i18n'
 import { t } from '../shared/i18n'
@@ -51,6 +53,7 @@ type SelectionAdjustState = {
 }
 
 const isCaptureMode = new URLSearchParams(window.location.search).get('capture') === '1'
+const isLiveColorMode = new URLSearchParams(window.location.search).get('livecolor') === '1'
 const isStudioMode = new URLSearchParams(window.location.search).get('studio') === '1'
 const initialColorView = new URLSearchParams(window.location.search).has('palettes') ? 'palettes' : new URLSearchParams(window.location.search).has('colors') ? 'colors' : null
 const initialCaptureMode = (new URLSearchParams(window.location.search).get('mode') ?? 'region') as CaptureMode
@@ -782,6 +785,8 @@ function CaptureOverlay(): JSX.Element {
       }
     }
 
+    if (tool === 'text' || tool === 'bubble' || tool === 'cursorHighlight' || tool === 'cursorSpotlight') return null
+
     return {
       id: crypto.randomUUID(),
       tool,
@@ -1090,7 +1095,7 @@ function CaptureOverlay(): JSX.Element {
       return { ...action, points: action.points.map(movePoint) }
     }
 
-    if (action.tool === 'text' || action.tool === 'bubble' || action.tool === 'stamp' || action.tool === 'numStamp') {
+    if (!('from' in action)) {
       return { ...action, at: movePoint(action.at) }
     }
 
@@ -1353,6 +1358,7 @@ function CaptureOverlay(): JSX.Element {
       return
     }
 
+    if (!('from' in action)) return
     const from = toCanvas(action.from)
     const to = toCanvas(action.to)
 
@@ -1961,6 +1967,7 @@ function CaptureOverlay(): JSX.Element {
               )
             }
 
+            if (!('from' in action)) return null
             if (action.tool === 'measure') return <MeasurementLine key={action.id} from={action.from} to={action.to} pixelsPerCm={action.pixelsPerCm} color={action.color} size={action.size} />
             return (
               <g key={action.id}>
@@ -2008,7 +2015,7 @@ function CaptureOverlay(): JSX.Element {
 
       {payload &&
         visibleActions
-          .filter((action): action is Extract<CaptureAction, { tool: 'blur' | 'pixelate' }> => action.tool === 'blur' || action.tool === 'pixelate')
+          .filter((action): action is ShapeAction & { tool: 'blur' | 'pixelate' } => action.tool === 'blur' || action.tool === 'pixelate')
           .map((action) => {
             const x = Math.min(action.from.x, action.to.x)
             const y = Math.min(action.from.y, action.to.y)
@@ -2473,6 +2480,7 @@ function CaptureOverlay(): JSX.Element {
 }
 
 export function App(): JSX.Element {
+  if (isLiveColorMode) return <LiveColorOverlay />
   if (isCaptureMode) {
     return <CaptureOverlay />
   }

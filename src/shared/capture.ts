@@ -1,4 +1,5 @@
 import type { AppLanguage } from './i18n'
+import type { UpdateCheckMode } from './updates'
 import type { AudioSource, VideoQuality, VideoResolution, WebcamShape } from './record'
 
 export type CaptureRect = {
@@ -51,11 +52,24 @@ export type CaptureResult = {
 export type CaptureMode = 'region' | 'fullscreen'
 export type RecordMode = 'region' | 'fullscreen'
 
+type TextAction<T extends 'text' | 'bubble'> = {
+  id: string
+  tool: T
+  color: string
+  size: number
+  at: { x: number; y: number }
+  text: string
+  bubbleStyle?: 'speech' | 'caption' | 'thought'
+  backgroundMode?: 'filled' | 'transparent' | 'outline'
+}
+
+export type ShapeTool = 'line' | 'arrow' | 'rect' | 'ellipse' | 'star' | 'magnifier' | 'blur' | 'pixelate' | 'measure'
+
 export type CaptureAction =
   | { id: string; tool: 'pen'; color: string; size: number; points: Array<{ x: number; y: number }> }
   | {
       id: string
-      tool: 'line' | 'arrow' | 'rect' | 'ellipse' | 'star' | 'magnifier' | 'blur' | 'pixelate' | 'measure'
+      tool: ShapeTool
       color: string
       size: number
       from: { x: number; y: number }
@@ -66,16 +80,8 @@ export type CaptureAction =
       showOutline?: boolean
       pixelsPerCm?: number
     }
-  | {
-      id: string
-      tool: 'text' | 'bubble'
-      color: string
-      size: number
-      at: { x: number; y: number }
-      text: string
-      bubbleStyle?: 'speech' | 'caption' | 'thought'
-      backgroundMode?: 'filled' | 'transparent' | 'outline'
-    }
+  | TextAction<'text'>
+  | TextAction<'bubble'>
   | {
       id: string
       tool: 'stamp'
@@ -100,6 +106,8 @@ export type CaptureAction =
       size: number
       at: { x: number; y: number }
     }
+
+export type ShapeAction = Extract<CaptureAction, { from: { x: number; y: number } }>
 
 export type CaptureExportPayload = {
   dataUrl: string
@@ -161,6 +169,9 @@ export type AppSettings = {
   webcamSize: number
   webcamFrameColor: string
   webcamDeviceId: string
+  updateCheckMode: UpdateCheckMode
+  includePrereleases: boolean
+  lastUpdateCheck: string
 }
 
 export type SettingsShortcutKey = keyof Pick<
@@ -249,5 +260,8 @@ export const defaultAppSettings: AppSettings = {
   webcamShape: 'circle',
   webcamSize: 180,
   webcamFrameColor: '#d94cff',
-  webcamDeviceId: ''
+  webcamDeviceId: '',
+  updateCheckMode: 'startup',
+  includePrereleases: true,
+  lastUpdateCheck: ''
 }

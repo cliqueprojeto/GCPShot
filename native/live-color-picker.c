@@ -1,5 +1,8 @@
 #include <gtk/gtk.h>
 #include <gdk/gdkx.h>
+#include <gio/gunixfdlist.h>
+#include <string.h>
+#include <stdlib.h>
 #include <signal.h>
 #include <errno.h>
 #include <stdio.h>
@@ -119,6 +122,134 @@ static int portal_pick(void) {
     return status;
 }
 
+/* ---- Silent screenshot mode (Wayland): KWin ScreenShot2, then the Screenshot portal without dialogs. ---- */
+
+static GMainLoop *shot_loop;
+static char *shot_uri;
+static guint shot_response = 2;
+
+static gboolean write_png(const char *path, guchar *data, int width, int height, int stride, guint format) {
+    /* QImage formats: 4 RGB32, 5 ARGB32, 6 ARGB32_Premultiplied (BGRA bytes on little endian); 16 RGBX8888, 17 RGBA8888, 18 RGBA8888_Premultiplied. */
+    gboolean bgra = format == 4 || format == 5 || format == 6;
+    gboolean rgba = format == 16 || format == 17 || format == 18;
+    if (!bgra && !rgba) { fprintf(stderr, "Formato de imagem do KWin nao suportado: %u\n", format); return FALSE; }
+    guchar *rgb = g_malloc((gsize)width * height * 3);
+    for (int y = 0; y < height; y++) {
+        const guchar *row = data + (gsize)y * stride;
+        guchar *out = rgb + (gsize)y * width * 3;
+        for (int x = 0; x < width; x++) {
+            const guchar *px = row + x * 4;
+            int alpha = (format == 6 || format == 18) ? px[3] : 255;
+            int r = bgra ? px[2] : px[0], g = px[1], b = bgra ? px[0] : px[2];
+            if (alpha > 0 && alpha < 255) { r = MIN(255, r * 255 / alpha); g = MIN(255, g * 255 / alpha); b = MIN(255, b * 255 / alpha); }
+            out[x * 3] = r; out[x * 3 + 1] = g; out[x * 3 + 2] = b;
+        }
+    }
+    GdkPixbuf *image = gdk_pixbuf_new_from_data(rgb, GDK_COLORSPACE_RGB, FALSE, 8, width, height, width * 3, NULL, NULL);
+    GError *error = NULL;
+    gboolean ok = gdk_pixbuf_save(image, path, "png", &error, "compression", "1", NULL);
+    if (!ok) { fprintf(stderr, "%s\n", error->message); g_error_free(error); }
+    g_object_unref(image); g_free(rgb);
+    return ok;
+}
+
+static int kwin_screenshot(GDBusConnection *bus, const char *path) {
+    int fds[2];
+    if (pipe(fds) != 0) return 1;
+    GError *error = NULL;
+    GUnixFDList *list = g_unix_fd_list_new();
+    int index = g_unix_fd_list_append(list, fds[1], &error);
+    close(fds[1]);
+    if (index < 0) { close(fds[0]); g_object_unref(list); if (error) g_error_free(error); return 1; }
+    GVariantBuilder options; g_variant_builder_init(&options, G_VARIANT_TYPE_VARDICT);
+    g_variant_builder_add(&options, "{sv}", "include-cursor", g_variant_new_boolean(FALSE));
+    g_variant_builder_add(&options, "{sv}", "native-resolution", g_variant_new_boolean(TRUE));
+    GVariant *reply = g_dbus_connection_call_with_unix_fd_list_sync(bus, "org.kde.KWin", "/org/kde/KWin/ScreenShot2", "org.kde.KWin.ScreenShot2", "CaptureActiveScreen",
+        g_variant_new("(a{sv}h)", &options, index), G_VARIANT_TYPE("(a{sv})"), G_DBUS_CALL_FLAGS_NONE, 6000, list, NULL, NULL, &error);
+    g_object_unref(list);
+    if (!reply) { fprintf(stderr, "KWin: %s\n", error->message); g_error_free(error); close(fds[0]); return 1; }
+    GVariant *results = g_variant_get_child_value(reply, 0);
+    guint width = 0, height = 0, stride = 0, format = 0;
+    g_variant_lookup(results, "width", "u", &width);
+    g_variant_lookup(results, "height", "u", &height);
+    g_variant_lookup(results, "stride", "u", &stride);
+    g_variant_lookup(results, "format", "u", &format);
+    g_variant_unref(results); g_variant_unref(reply);
+    gsize expected = (gsize)stride * height, received = 0;
+    if (!width || !height || stride < width * 4 || expected > ((gsize)1 << 31)) { close(fds[0]); fprintf(stderr, "KWin devolveu uma imagem invalida.\n"); return 1; }
+    guchar *data = g_malloc(expected);
+    while (received < expected) {
+        ssize_t count = read(fds[0], data + received, expected - received);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) break;
+        received += (gsize)count;
+    }
+    close(fds[0]);
+    int status = received == expected && write_png(path, data, (int)width, (int)height, (int)stride, format) ? 0 : 1;
+    if (received != expected) fprintf(stderr, "KWin enviou a captura incompleta.\n");
+    g_free(data);
+    if (status == 0) { printf("OK kwin screen %u %u\n", width, height); fflush(stdout); }
+    return status;
+}
+
+static void shot_portal_response(GDBusConnection *connection, const gchar *sender, const gchar *path, const gchar *iface, const gchar *signal, GVariant *parameters, gpointer user_data) {
+    (void)connection; (void)sender; (void)iface; (void)signal;
+    if (g_strcmp0(path, (char *)user_data)) return;
+    GVariant *result;
+    g_variant_get(parameters, "(u@a{sv})", &shot_response, &result);
+    const char *uri = NULL;
+    if (shot_response == 0 && g_variant_lookup(result, "uri", "&s", &uri)) shot_uri = g_strdup(uri);
+    g_variant_unref(result);
+    g_main_loop_quit(shot_loop);
+}
+
+static gboolean shot_timeout(gpointer unused) { (void)unused; g_main_loop_quit(shot_loop); return G_SOURCE_REMOVE; }
+
+static int portal_screenshot(GDBusConnection *bus, const char *path) {
+    GError *error = NULL;
+    char *sender = g_strdup(g_dbus_connection_get_unique_name(bus) + 1);
+    for (char *p = sender; *p; p++) if (*p == '.') *p = '_';
+    char *token = g_strdup_printf("gcpshot_shot_%d", getpid());
+    char *request = g_strdup_printf("/org/freedesktop/portal/desktop/request/%s/%s", sender, token);
+    shot_loop = g_main_loop_new(NULL, FALSE);
+    guint subscription = g_dbus_connection_signal_subscribe(bus, "org.freedesktop.portal.Desktop", "org.freedesktop.portal.Request", "Response", request, NULL, G_DBUS_SIGNAL_FLAGS_NONE, shot_portal_response, request, NULL);
+    GVariantBuilder options; g_variant_builder_init(&options, G_VARIANT_TYPE_VARDICT);
+    g_variant_builder_add(&options, "{sv}", "handle_token", g_variant_new_string(token));
+    g_variant_builder_add(&options, "{sv}", "interactive", g_variant_new_boolean(FALSE));
+    g_variant_builder_add(&options, "{sv}", "modal", g_variant_new_boolean(FALSE));
+    GVariant *call = g_dbus_connection_call_sync(bus, "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop", "org.freedesktop.portal.Screenshot", "Screenshot",
+        g_variant_new("(sa{sv})", "", &options), G_VARIANT_TYPE("(o)"), G_DBUS_CALL_FLAGS_NONE, 6000, NULL, &error);
+    int status = 1;
+    if (!call) { fprintf(stderr, "Portal de captura: %s\n", error->message); g_error_free(error); }
+    else {
+        g_timeout_add_seconds(60, shot_timeout, NULL);
+        g_main_loop_run(shot_loop);
+        g_variant_unref(call);
+        if (shot_uri) {
+            GFile *source = g_file_new_for_uri(shot_uri), *target = g_file_new_for_path(path);
+            if (g_file_copy(source, target, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, &error)) {
+                g_file_delete(source, NULL, NULL);
+                printf("OK portal desktop\n"); fflush(stdout); status = 0;
+            } else { fprintf(stderr, "%s\n", error->message); g_error_free(error); }
+            g_object_unref(source); g_object_unref(target);
+        } else fprintf(stderr, shot_response == 1 ? "Captura negada pelo sistema.\n" : "O portal de captura nao respondeu.\n");
+    }
+    g_dbus_connection_signal_unsubscribe(bus, subscription);
+    g_main_loop_unref(shot_loop);
+    g_free(request); g_free(token); g_free(sender); g_free(shot_uri);
+    return status;
+}
+
+static int silent_screenshot(const char *path, gboolean allow_kwin) {
+    GError *error = NULL;
+    GDBusConnection *bus = g_bus_get_sync(G_BUS_TYPE_SESSION, NULL, &error);
+    if (!bus) { fprintf(stderr, "%s\n", error->message); g_error_free(error); return 1; }
+    int status = allow_kwin ? kwin_screenshot(bus, path) : 1;
+    if (status != 0) status = portal_screenshot(bus, path);
+    g_object_unref(bus);
+    return status;
+}
+
 static gboolean watch_parent(gpointer unused) {
     (void)unused;
     if ((parent_pid > 0 && kill(parent_pid, 0) == -1 && errno == ESRCH) || g_get_monotonic_time() > session_deadline) {
@@ -147,6 +278,8 @@ static gboolean try_grab(gpointer unused) {
 }
 
 int main(int argc, char **argv) {
+    /* --screenshot <file.png> [--no-kwin]: silent capture of the active monitor without opening GTK windows. */
+    if (argc > 2 && strcmp(argv[1], "--screenshot") == 0) return silent_screenshot(argv[2], !(argc > 3 && strcmp(argv[3], "--no-kwin") == 0));
     parent_pid = argc > 1 ? atoi(argv[1]) : 0;
     session_deadline = g_get_monotonic_time() + 120 * G_USEC_PER_SEC;
     gtk_init(&argc, &argv);
