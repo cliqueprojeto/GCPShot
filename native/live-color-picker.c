@@ -153,21 +153,37 @@ static gboolean write_png(const char *path, guchar *data, int width, int height,
     return ok;
 }
 
+/* KWin's active output follows the mouse; Chromium on Wayland cannot report the cursor, so ask KWin. */
+static char *kwin_active_output(GDBusConnection *bus) {
+    GVariant *reply = g_dbus_connection_call_sync(bus, "org.kde.KWin", "/KWin", "org.kde.KWin", "activeOutputName", NULL, G_VARIANT_TYPE("(s)"), G_DBUS_CALL_FLAGS_NONE, 2000, NULL, NULL);
+    if (!reply) return NULL;
+    char *name = NULL;
+    g_variant_get(reply, "(s)", &name);
+    g_variant_unref(reply);
+    if (name && !*name) { g_free(name); name = NULL; }
+    return name;
+}
+
 static int kwin_screenshot(GDBusConnection *bus, const char *path) {
+    char *output = kwin_active_output(bus);
     int fds[2];
-    if (pipe(fds) != 0) return 1;
+    if (pipe(fds) != 0) { g_free(output); return 1; }
     GError *error = NULL;
     GUnixFDList *list = g_unix_fd_list_new();
     int index = g_unix_fd_list_append(list, fds[1], &error);
     close(fds[1]);
-    if (index < 0) { close(fds[0]); g_object_unref(list); if (error) g_error_free(error); return 1; }
+    if (index < 0) { close(fds[0]); g_object_unref(list); if (error) g_error_free(error); g_free(output); return 1; }
     GVariantBuilder options; g_variant_builder_init(&options, G_VARIANT_TYPE_VARDICT);
     g_variant_builder_add(&options, "{sv}", "include-cursor", g_variant_new_boolean(FALSE));
     g_variant_builder_add(&options, "{sv}", "native-resolution", g_variant_new_boolean(TRUE));
-    GVariant *reply = g_dbus_connection_call_with_unix_fd_list_sync(bus, "org.kde.KWin", "/org/kde/KWin/ScreenShot2", "org.kde.KWin.ScreenShot2", "CaptureActiveScreen",
-        g_variant_new("(a{sv}h)", &options, index), G_VARIANT_TYPE("(a{sv})"), G_DBUS_CALL_FLAGS_NONE, 6000, list, NULL, NULL, &error);
+    /* Capture the named output so the image and the reported monitor can never disagree. */
+    GVariant *reply = output
+        ? g_dbus_connection_call_with_unix_fd_list_sync(bus, "org.kde.KWin", "/org/kde/KWin/ScreenShot2", "org.kde.KWin.ScreenShot2", "CaptureScreen",
+            g_variant_new("(sa{sv}h)", output, &options, index), G_VARIANT_TYPE("(a{sv})"), G_DBUS_CALL_FLAGS_NONE, 6000, list, NULL, NULL, &error)
+        : g_dbus_connection_call_with_unix_fd_list_sync(bus, "org.kde.KWin", "/org/kde/KWin/ScreenShot2", "org.kde.KWin.ScreenShot2", "CaptureActiveScreen",
+            g_variant_new("(a{sv}h)", &options, index), G_VARIANT_TYPE("(a{sv})"), G_DBUS_CALL_FLAGS_NONE, 6000, list, NULL, NULL, &error);
     g_object_unref(list);
-    if (!reply) { fprintf(stderr, "KWin: %s\n", error->message); g_error_free(error); close(fds[0]); return 1; }
+    if (!reply) { fprintf(stderr, "KWin: %s\n", error->message); g_error_free(error); close(fds[0]); g_free(output); return 1; }
     GVariant *results = g_variant_get_child_value(reply, 0);
     guint width = 0, height = 0, stride = 0, format = 0;
     g_variant_lookup(results, "width", "u", &width);
@@ -176,7 +192,7 @@ static int kwin_screenshot(GDBusConnection *bus, const char *path) {
     g_variant_lookup(results, "format", "u", &format);
     g_variant_unref(results); g_variant_unref(reply);
     gsize expected = (gsize)stride * height, received = 0;
-    if (!width || !height || stride < width * 4 || expected > ((gsize)1 << 31)) { close(fds[0]); fprintf(stderr, "KWin devolveu uma imagem invalida.\n"); return 1; }
+    if (!width || !height || stride < width * 4 || expected > ((gsize)1 << 31)) { close(fds[0]); g_free(output); fprintf(stderr, "KWin devolveu uma imagem invalida.\n"); return 1; }
     guchar *data = g_malloc(expected);
     while (received < expected) {
         ssize_t count = read(fds[0], data + received, expected - received);
@@ -188,7 +204,8 @@ static int kwin_screenshot(GDBusConnection *bus, const char *path) {
     int status = received == expected && write_png(path, data, (int)width, (int)height, (int)stride, format) ? 0 : 1;
     if (received != expected) fprintf(stderr, "KWin enviou a captura incompleta.\n");
     g_free(data);
-    if (status == 0) { printf("OK kwin screen %u %u\n", width, height); fflush(stdout); }
+    if (status == 0) { printf("OK kwin screen %u %u %s\n", width, height, output ? output : ""); fflush(stdout); }
+    g_free(output);
     return status;
 }
 
@@ -250,6 +267,127 @@ static int silent_screenshot(const char *path, gboolean allow_kwin) {
     return status;
 }
 
+/* ---- KDE global shortcuts (Wayland): direct kglobalaccel registration, line protocol on stdin/stdout. ----
+ * SET <action> <qtkey|0> <friendly name>  -> SET <action> <assigned qtkey|0>
+ * AVAIL <tag> <qtkey>                      -> AVAIL <tag> <1|0>
+ * PURGE <component>                        -> PURGE <count>   (drops stale actions of an old component)
+ * Key presses are reported as PRESSED <action>. */
+#define KEYS_COMPONENT "gcpshotkeys"
+#define KEYS_FRIENDLY "GCPShot"
+static GDBusConnection *keys_bus;
+static GMainLoop *keys_loop;
+static GPtrArray *keys_actions;
+
+static GVariant *keys_action_id(const char *action, const char *friendly) {
+    const char *parts[] = { KEYS_COMPONENT, action, KEYS_FRIENDLY, friendly && *friendly ? friendly : action };
+    return g_variant_new_strv(parts, 4);
+}
+
+static GVariant *keys_call(const char *path, const char *iface, const char *method, GVariant *args, const char *type) {
+    GError *error = NULL;
+    GVariant *reply = g_dbus_connection_call_sync(keys_bus, "org.kde.kglobalaccel", path, iface, method, args, type ? G_VARIANT_TYPE(type) : NULL, G_DBUS_CALL_FLAGS_NONE, 4000, NULL, &error);
+    if (!reply) { fprintf(stderr, "kglobalaccel %s: %s\n", method, error->message); g_error_free(error); }
+    return reply;
+}
+
+static void keys_pressed(GDBusConnection *connection, const gchar *sender, const gchar *path, const gchar *iface, const gchar *signal, GVariant *parameters, gpointer unused) {
+    (void)connection; (void)sender; (void)path; (void)iface; (void)signal; (void)unused;
+    const char *component = NULL, *action = NULL; gint64 timestamp = 0;
+    g_variant_get(parameters, "(&s&sx)", &component, &action, &timestamp);
+    if (g_strcmp0(component, KEYS_COMPONENT) == 0) { printf("PRESSED %s\n", action); fflush(stdout); }
+}
+
+static void keys_set(const char *action, int key, const char *friendly) {
+    GVariant *reply = keys_call("/kglobalaccel", "org.kde.KGlobalAccel", "doRegister", g_variant_new("(@as)", keys_action_id(action, friendly)), NULL);
+    if (reply) g_variant_unref(reply);
+    GVariantBuilder keys; g_variant_builder_init(&keys, G_VARIANT_TYPE("a(ai)"));
+    if (key) { GVariantBuilder seq; g_variant_builder_init(&seq, G_VARIANT_TYPE("ai")); g_variant_builder_add(&seq, "i", key); g_variant_builder_add(&keys, "(ai)", &seq); }
+    /* 2 = SetPresent, 4 = NoAutoloading: GCPShot's own settings are the source of truth. */
+    reply = keys_call("/kglobalaccel", "org.kde.KGlobalAccel", "setShortcutKeys", g_variant_new("(@asa(ai)u)", keys_action_id(action, friendly), &keys, 6u), "(a(ai))");
+    int assigned = 0;
+    if (reply) {
+        GVariant *list = g_variant_get_child_value(reply, 0);
+        if (g_variant_n_children(list) > 0) {
+            GVariant *seq = g_variant_get_child_value(list, 0), *ints = g_variant_get_child_value(seq, 0);
+            if (g_variant_n_children(ints) > 0) g_variant_get_child(ints, 0, "i", &assigned);
+            g_variant_unref(ints); g_variant_unref(seq);
+        }
+        g_variant_unref(list); g_variant_unref(reply);
+    }
+    gboolean known = FALSE;
+    for (guint i = 0; i < keys_actions->len; i++) if (g_strcmp0(g_ptr_array_index(keys_actions, i), action) == 0) known = TRUE;
+    if (!known) g_ptr_array_add(keys_actions, g_strdup(action));
+    printf("SET %s %d\n", action, assigned); fflush(stdout);
+}
+
+static void keys_avail(const char *tag, int key) {
+    GVariantBuilder seq; g_variant_builder_init(&seq, G_VARIANT_TYPE("ai")); g_variant_builder_add(&seq, "i", key);
+    GVariant *reply = keys_call("/kglobalaccel", "org.kde.KGlobalAccel", "globalShortcutAvailable", g_variant_new("((ai)s)", &seq, KEYS_COMPONENT), "(b)");
+    gboolean available = FALSE;
+    if (reply) { g_variant_get(reply, "(b)", &available); g_variant_unref(reply); }
+    printf("AVAIL %s %d\n", tag, available ? 1 : 0); fflush(stdout);
+}
+
+static void keys_purge(const char *component) {
+    int count = 0;
+    char *path = g_strdup_printf("/component/%s", component);
+    GError *error = NULL;
+    GVariant *reply = g_dbus_connection_call_sync(keys_bus, "org.kde.kglobalaccel", path, "org.kde.kglobalaccel.Component", "shortcutNames", NULL, G_VARIANT_TYPE("(as)"), G_DBUS_CALL_FLAGS_NONE, 4000, NULL, &error);
+    if (reply) {
+        GVariantIter *names; const char *name;
+        g_variant_get(reply, "(as)", &names);
+        while (g_variant_iter_next(names, "&s", &name)) {
+            GVariant *done = keys_call("/kglobalaccel", "org.kde.KGlobalAccel", "unregister", g_variant_new("(ss)", component, name), "(b)");
+            if (done) { count++; g_variant_unref(done); }
+        }
+        g_variant_iter_free(names); g_variant_unref(reply);
+    } else g_error_free(error);
+    g_free(path);
+    printf("PURGE %d\n", count); fflush(stdout);
+}
+
+static gboolean keys_input(GIOChannel *channel, GIOCondition condition, gpointer unused) {
+    (void)unused;
+    if (condition & (G_IO_HUP | G_IO_ERR)) { g_main_loop_quit(keys_loop); return G_SOURCE_REMOVE; }
+    char *line = NULL; gsize length = 0;
+    GIOStatus status = g_io_channel_read_line(channel, &line, &length, NULL, NULL);
+    if (status == G_IO_STATUS_EOF || status == G_IO_STATUS_ERROR) { g_free(line); g_main_loop_quit(keys_loop); return G_SOURCE_REMOVE; }
+    if (!line) return G_SOURCE_CONTINUE;
+    g_strchomp(line);
+    char **words = g_strsplit(line, " ", 4);
+    guint count = g_strv_length(words);
+    if (count >= 3 && strcmp(words[0], "SET") == 0) keys_set(words[1], atoi(words[2]), count > 3 ? words[3] : NULL);
+    else if (count >= 3 && strcmp(words[0], "AVAIL") == 0) keys_avail(words[1], atoi(words[2]));
+    else if (count >= 2 && strcmp(words[0], "PURGE") == 0 && strcmp(words[1], KEYS_COMPONENT) != 0) keys_purge(words[1]);
+    else if (count >= 1 && strcmp(words[0], "QUIT") == 0) g_main_loop_quit(keys_loop);
+    else { printf("ERR %s\n", words[0] ? words[0] : ""); fflush(stdout); }
+    g_strfreev(words); g_free(line);
+    return G_SOURCE_CONTINUE;
+}
+
+static int kde_shortcuts(void) {
+    GError *error = NULL;
+    keys_bus = g_bus_get_sync(G_BUS_TYPE_SESSION, NULL, &error);
+    if (!keys_bus) { fprintf(stderr, "%s\n", error->message); g_error_free(error); return 1; }
+    GVariant *ping = keys_call("/kglobalaccel", "org.freedesktop.DBus.Peer", "Ping", NULL, NULL);
+    if (!ping) return 1;
+    g_variant_unref(ping);
+    keys_actions = g_ptr_array_new_with_free_func(g_free);
+    keys_loop = g_main_loop_new(NULL, FALSE);
+    g_dbus_connection_signal_subscribe(keys_bus, "org.kde.kglobalaccel", "org.kde.kglobalaccel.Component", "globalShortcutPressed", NULL, NULL, G_DBUS_SIGNAL_FLAGS_NONE, keys_pressed, NULL, NULL);
+    GIOChannel *input = g_io_channel_unix_new(0);
+    g_io_add_watch(input, G_IO_IN | G_IO_HUP | G_IO_ERR, keys_input, NULL);
+    puts("READY"); fflush(stdout);
+    g_main_loop_run(keys_loop);
+    /* Like KGlobalAccel clients on exit: keep the keys reserved for GCPShot but stop grabbing them. */
+    for (guint i = 0; i < keys_actions->len; i++) {
+        GVariant *reply = keys_call("/kglobalaccel", "org.kde.KGlobalAccel", "setInactive", g_variant_new("(@as)", keys_action_id(g_ptr_array_index(keys_actions, i), NULL)), NULL);
+        if (reply) g_variant_unref(reply);
+    }
+    g_dbus_connection_flush_sync(keys_bus, NULL, NULL);
+    return 0;
+}
+
 static gboolean watch_parent(gpointer unused) {
     (void)unused;
     if ((parent_pid > 0 && kill(parent_pid, 0) == -1 && errno == ESRCH) || g_get_monotonic_time() > session_deadline) {
@@ -279,6 +417,8 @@ static gboolean try_grab(gpointer unused) {
 
 int main(int argc, char **argv) {
     /* --screenshot <file.png> [--no-kwin]: silent capture of the active monitor without opening GTK windows. */
+    /* --kglobalaccel: KDE global shortcut bridge driven by GCPShot over stdin/stdout. */
+    if (argc > 1 && strcmp(argv[1], "--kglobalaccel") == 0) return kde_shortcuts();
     if (argc > 2 && strcmp(argv[1], "--screenshot") == 0) return silent_screenshot(argv[2], !(argc > 3 && strcmp(argv[3], "--no-kwin") == 0));
     parent_pid = argc > 1 ? atoi(argv[1]) : 0;
     session_deadline = g_get_monotonic_time() + 120 * G_USEC_PER_SEC;

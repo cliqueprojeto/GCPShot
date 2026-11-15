@@ -154,6 +154,8 @@ export type AppSettings = {
   starShortcut: string
   cancelShortcut: string
   printScreenShortcut: boolean
+  /** Version of the automatic global-shortcut assignment last applied (Linux migrations). */
+  shortcutScheme?: number
   defaultFormat: 'png' | 'jpg'
   language: AppLanguage
   videoQuality: VideoQuality

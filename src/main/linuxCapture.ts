@@ -50,6 +50,38 @@ function grim(file: string): Promise<boolean> {
   return new Promise((resolve) => execFile('grim', [file], { timeout: 10_000 }, (error) => resolve(!error)))
 }
 
+type KscreenOutput = { name: string; enabled?: boolean; pos?: { x: number; y: number }; size?: { width: number; height: number }; scale?: number; rotation?: number }
+
+function kscreenOutputs(): Promise<KscreenOutput[]> {
+  return new Promise((resolve) => execFile('kscreen-doctor', ['-j'], { timeout: 3000, maxBuffer: 4 * 1024 * 1024 }, (error, stdout) => {
+    if (error) { resolve([]); return }
+    try { resolve((JSON.parse(stdout) as { outputs?: KscreenOutput[] }).outputs ?? []) } catch { resolve([]) }
+  }))
+}
+
+/**
+ * Maps a KWin output name (eDP-1, HDMI-A-1…) to the Electron display with the same logical geometry.
+ * Chromium on Wayland reports the cursor at 0,0, so the output KWin captured is the only reliable source.
+ */
+export async function displayForOutput(name: string, imageSize: Electron.Size): Promise<Electron.Display | null> {
+  const displays = screen.getAllDisplays()
+  if (displays.length === 1) return displays[0]
+  const output = (await kscreenOutputs()).find((item) => item.name === name && item.enabled !== false)
+  if (output?.pos && output.size) {
+    const scale = output.scale || 1
+    const rotated = output.rotation === 2 || output.rotation === 8
+    const width = Math.round((rotated ? output.size.height : output.size.width) / scale)
+    const height = Math.round((rotated ? output.size.width : output.size.height) / scale)
+    const exact = displays.find((display) => Math.abs(display.bounds.x - output.pos!.x) <= 2 && Math.abs(display.bounds.y - output.pos!.y) <= 2)
+    if (exact) return exact
+    const sized = displays.filter((display) => Math.abs(display.bounds.width - width) <= 2 && Math.abs(display.bounds.height - height) <= 2)
+    if (sized.length === 1) return sized[0]
+  }
+  // Without KScreen: an image whose pixel size identifies a single monitor is still unambiguous.
+  const matches = displays.filter((display) => Math.abs(Math.round(display.size.width * display.scaleFactor) - imageSize.width) <= 2 && Math.abs(Math.round(display.size.height * display.scaleFactor) - imageSize.height) <= 2)
+  return matches.length === 1 ? matches[0] : null
+}
+
 /** Chooses the display the image belongs to: same pixel size, preferring the one under the mouse. */
 function displayForImage(size: Electron.Size): Electron.Display {
   const cursorDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
@@ -85,12 +117,15 @@ export async function silentLinuxScreenshot(): Promise<SilentShot | null> {
   const file = join(directory, 'screen.png')
   try {
     let output = existsSync(linuxHelperPath()) ? await runHelper(['--screenshot', file]) : null
-    let method = output?.match(/^OK (\w+) (\w+)/m)
+    let method = output?.match(/^OK (\w+) (\w+)(?: \d+ \d+ ?(\S*))?/m)
     if (!method && (await grim(file))) { output = 'OK grim desktop'; method = output.match(/^OK (\w+) (\w+)/m) }
     if (!method || !existsSync(file)) return null
     const image = nativeImage.createFromPath(file)
     if (image.isEmpty()) return null
-    if (method[2] === 'screen') return { image, display: displayForImage(image.getSize()), method: method[1] }
+    if (method[2] === 'screen') {
+      const named = method[3] ? await displayForOutput(method[3], image.getSize()) : null
+      return { image, display: named ?? displayForImage(image.getSize()), method: method[1] }
+    }
     return { ...cropToCursorDisplay(image), method: method[1] }
   } finally { await rm(directory, { recursive: true, force: true }).catch(() => {}) }
 }

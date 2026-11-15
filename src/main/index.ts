@@ -24,10 +24,11 @@ import { getColorLibrary, loadColorLibrary, saveColorLibrary } from './colorLibr
 import { getStoredCaptures, removeStoredCapture, storeCapture } from './captureStore'
 import type { UpdateStatus } from '../shared/updates'
 import { DEVELOPER_CREDIT, GCP_SITE_URL, ORGANIZATION_NAME, isProjectSiteUrl } from '../shared/branding'
-import { authorizeKwinScreenshots, isWaylandSession, silentLinuxScreenshot } from './linuxCapture'
-import { readDesktopShortcuts, type DesktopShortcuts } from './desktopShortcuts'
+import { authorizeKwinScreenshots, isWaylandSession, linuxHelperPath, silentLinuxScreenshot } from './linuxCapture'
+import { detectDesktop, readDesktopShortcuts, type DesktopShortcuts } from './desktopShortcuts'
+import { KdeShortcuts } from './kdeShortcuts'
 import { checkForUpdates, downloadAndInstall, getUpdateStatus, onUpdateStatus, setLastCheck } from './updater'
-import { canonicalShortcut, globalShortcutKeys, shortcutCandidates, shortcutIdentity, validGlobalShortcut, type GlobalShortcutKey, type ShortcutInfo } from '../shared/shortcuts'
+import { brokenOnPlatform, canonicalShortcut, globalShortcutKeys, shortcutCandidates, shortcutIdentity, validGlobalShortcut, type GlobalShortcutKey, type ShortcutInfo } from '../shared/shortcuts'
 
 type MainView = 'home' | 'studio' | 'colors' | 'palettes'
 
@@ -52,6 +53,13 @@ let desktopShortcuts: DesktopShortcuts = { desktop: 'other', label: '', reserved
 const reservedByDesktop = (value: string): boolean => desktopShortcuts.reserved.has(shortcutIdentity(value, process.platform))
 const availableCandidates = (key: GlobalShortcutKey): string[] => shortcutCandidates(process.platform, key).filter((value) => !reservedByDesktop(value))
 let settingsQueue: Promise<unknown> = Promise.resolve()
+let shortcutQueue: Promise<unknown> = Promise.resolve()
+/** Current automatic shortcut scheme: 2 = Alt+1…Alt+4 on Linux, no Shift+digit, direct KDE registration. */
+const SHORTCUT_SCHEME = 2
+/** KDE Plasma on Wayland: shortcuts go straight to kglobalaccel (the Chromium portal loses its session there). */
+const kdeKeys = process.platform === 'linux' && isWaylandSession && detectDesktop() === 'kde' ? new KdeShortcuts(linuxHelperPath()) : null
+const shortcutLabels: Record<string, string> = { captureShortcut: 'Capturar regiao', fullscreenShortcut: 'Capturar tela inteira', studioShortcut: 'Abrir o Estudio', liveColorShortcut: 'Live Color', printScreen: 'Print Screen - capturar regiao' }
+async function kdeBackend(): Promise<KdeShortcuts | null> { return kdeKeys && (await kdeKeys.start()) ? kdeKeys : null }
 
 const isDev = Boolean(process.env.ELECTRON_RENDERER_URL)
 app.setName('GCPShot')
@@ -116,24 +124,47 @@ function normalizeSettingsShortcuts(nextSettings: AppSettings): AppSettings {
 }
 
 async function loadSettings(): Promise<AppSettings> {
+  let loaded: AppSettings
   try {
     const file = await readFile(settingsPath(), 'utf8')
-    return normalizeSettingsShortcuts({ ...defaultSettings, ...JSON.parse(file) })
+    loaded = normalizeSettingsShortcuts({ ...defaultSettings, ...JSON.parse(file) })
   } catch {
-    const defaults = { ...defaultSettings }
-    for (const key of globalShortcutKeys) defaults[key] = firstFreeShortcut(key, defaults)
-    return defaults
+    return assignFreeShortcuts({ ...defaultSettings })
   }
+  // Linux: older versions assigned Shift+digit combos that never fire and skipped easy keys; reassign once.
+  if (process.platform === 'linux' && ((loaded.shortcutScheme ?? 0) < SHORTCUT_SCHEME || globalShortcutKeys.some((key) => brokenOnPlatform(loaded[key], process.platform)))) {
+    return assignFreeShortcuts(loaded)
+  }
+  return loaded
+}
+
+/** Gives every global action the easiest free shortcut (Alt+1…Alt+4 on Linux when available). */
+async function assignFreeShortcuts(target: AppSettings): Promise<AppSettings> {
+  const draft = { ...target }
+  for (const key of globalShortcutKeys) draft[key] = ''
+  for (const key of globalShortcutKeys) draft[key] = await firstFreeShortcut(key, draft)
+  draft.shortcutScheme = SHORTCUT_SCHEME
+  return draft
+}
+
+/** Asks the system whether a combination is free right now. */
+async function shortcutIsFree(value: string): Promise<boolean> {
+  const kde = await kdeBackend()
+  if (kde) return kde.available(value)
+  if (isWaylandSession) return true // Portal registration is consent-gated: rely on the desktop's own config.
+  if (globalShortcut.isRegistered(value)) return true
+  try {
+    if (!globalShortcut.register(value, () => {})) return false
+    globalShortcut.unregister(value)
+    return true
+  } catch { return false }
 }
 
 /** Picks the easiest candidate that the OS has not reserved and that no other GCPShot action already uses. */
-function firstFreeShortcut(key: GlobalShortcutKey, current: AppSettings): string {
-  const taken = new Set(globalShortcutKeys.filter((other) => other !== key).map((other) => shortcutIdentity(current[other], process.platform)))
+async function firstFreeShortcut(key: GlobalShortcutKey, current: AppSettings): Promise<string> {
+  const taken = new Set(globalShortcutKeys.filter((other) => other !== key && current[other]).map((other) => shortcutIdentity(current[other], process.platform)))
   const options = availableCandidates(key).filter((value) => !taken.has(shortcutIdentity(value, process.platform)))
-  for (const value of options) {
-    if (isWaylandSession || globalShortcut.isRegistered(value)) return value
-    try { if (globalShortcut.register(value, () => {})) { globalShortcut.unregister(value); return value } } catch { /* reserved */ }
-  }
+  for (const value of options) if (await shortcutIsFree(value)) return value
   return options[0] ?? shortcutCandidates(process.platform, key)[0]
 }
 
@@ -437,7 +468,8 @@ async function pickColorFromSilentShot(wasVisible: boolean): Promise<string | nu
   const size = image.getSize()
   return new Promise((resolve) => {
     const window = new BrowserWindow({
-      ...display.bounds, frame: false, fullscreen: true, show: false, resizable: false, movable: false,
+      // Wayland: a non-resizable fullscreen window gets oversized by client-side insets (1568x906 on a 1536x864 monitor).
+      ...display.bounds, frame: false, fullscreen: true, show: false, resizable: true, movable: false,
       alwaysOnTop: true, skipTaskbar: true, backgroundColor: '#000000', title: 'GCPShot Live Color', icon: getAppIcon(),
       webPreferences: { preload: join(__dirname, '../preload/index.js'), contextIsolation: true, nodeIntegration: false, sandbox: false }
     })
@@ -531,13 +563,13 @@ function createTray(): void {
   tray.setToolTip('GCPShot')
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: 'Capturar região', icon: trayMenuIcon('region'), click: () => void beginCapture('region') },
-      { label: 'Capturar tela inteira', icon: trayMenuIcon('fullscreen'), click: () => void beginCapture('fullscreen') },
+      { label: 'Capturar região', icon: trayMenuIcon('region'), click: () => afterTrayMenu(() => beginCapture('region')) },
+      { label: 'Capturar tela inteira', icon: trayMenuIcon('fullscreen'), click: () => afterTrayMenu(() => beginCapture('fullscreen')) },
       { type: 'separator' },
       { label: 'Abrir o Estúdio', icon: trayMenuIcon('studio'), click: openStudioWindow },
       { label: 'Color Lab', icon: trayMenuIcon('colors'), click: () => openColorWindow('colors') },
       { label: 'Minhas Paletas', icon: trayMenuIcon('palettes'), click: () => openColorWindow('palettes') },
-      { label: 'Live Color', icon: trayMenuIcon('live'), accelerator: settings.liveColorShortcut, registerAccelerator: false, click: () => void beginLiveColor().then((result) => { if (result.error) notify('Live Color', result.error) }) },
+      { label: 'Live Color', icon: trayMenuIcon('live'), accelerator: settings.liveColorShortcut, registerAccelerator: false, click: () => afterTrayMenu(() => beginLiveColor().then((result) => { if (result.error) notify('Live Color', result.error) })) },
       { type: 'separator' },
       { label: 'Configurações', icon: trayMenuIcon('settings'), click: openSettingsWindow },
       { label: 'Verificar atualizações', icon: trayMenuIcon('about'), click: () => void runUpdateCheck(true) },
@@ -562,6 +594,11 @@ function createTray(): void {
       }
     ])
   )
+}
+
+/** Waits for the tray menu to finish its close animation so it never ends up inside the screenshot. */
+function afterTrayMenu(action: () => unknown): void {
+  setTimeout(() => void action(), process.platform === 'linux' ? 480 : 220)
 }
 
 function trayMenuIcon(name: string): Electron.NativeImage {
@@ -670,7 +707,8 @@ function openOverlayWindow(
     height: desktopHeight,
     frame: false,
     fullscreen,
-    resizable: false,
+    // Wayland: resizable:false makes fullscreen windows larger than the monitor, shifting the selection and cutting the panel.
+    resizable: fullscreen,
     movable: false,
     transparent: overlay === 'record',
     alwaysOnTop: true,
@@ -690,7 +728,7 @@ function openOverlayWindow(
   if (overlay === 'record') {
     window.setContentProtection(true)
   }
-  window.setBounds({ x: minX, y: minY, width: desktopWidth, height: desktopHeight })
+  if (!fullscreen) window.setBounds({ x: minX, y: minY, width: desktopWidth, height: desktopHeight })
   window.setAlwaysOnTop(true, 'screen-saver')
   window.webContents.once('did-finish-load', () => {
     window.webContents.send('capture:image', {
@@ -1015,22 +1053,20 @@ function registerIpc(): void {
     if (enabled) {
       if (!shortcutEditorOwners.has(id)) {
         shortcutEditorOwners.add(id)
-        event.sender.once('destroyed', () => { shortcutEditors.delete(id); shortcutEditorOwners.delete(id); if (!isQuitting && shortcutEditors.size === 0) registerShortcuts(settings, true) })
+        event.sender.once('destroyed', () => { shortcutEditors.delete(id); shortcutEditorOwners.delete(id); if (!isQuitting && shortcutEditors.size === 0) void registerShortcuts(settings, true).catch(() => {}) })
       }
       shortcutEditors.add(id)
-      globalShortcut.unregisterAll()
+      return queueShortcutWork(unregisterGlobalShortcuts)
     } else {
       shortcutEditors.delete(id)
-      if (shortcutEditors.size === 0) registerShortcuts(settings, true)
+      if (shortcutEditors.size === 0) return registerShortcuts(settings, true).catch(() => {})
     }
   })
   ipcMain.handle('settings:update', async (_event, patch: Partial<AppSettings>): Promise<AppSettings> => {
     return updateSettings(patch)
   })
   ipcMain.handle('settings:reset', async (): Promise<AppSettings> => {
-    const defaults = { ...defaultSettings }
-    for (const key of globalShortcutKeys) defaults[key] = firstFreeShortcut(key, defaults)
-    return updateSettings(defaults)
+    return updateSettings(await assignFreeShortcuts({ ...defaultSettings }))
   })
   ipcMain.handle('window:show-main', () => {
     showMainWindow()
@@ -1139,11 +1175,32 @@ function registerIpc(): void {
   })
 }
 
-function registerShortcuts(next = settings, recover = true): void {
+function queueShortcutWork<T>(work: () => Promise<T>): Promise<T> {
+  const operation = shortcutQueue.then(work)
+  shortcutQueue = operation.catch(() => {})
+  return operation
+}
+
+async function unregisterGlobalShortcuts(): Promise<void> {
   globalShortcut.unregisterAll()
-  const handlers = {
+  const kde = await kdeBackend()
+  if (kde) for (const action of [...globalShortcutKeys, 'printScreen']) await kde.unbind(action, shortcutLabels[action])
+}
+
+function registerShortcuts(next = settings, recover = true): Promise<void> {
+  return queueShortcutWork(() => registerShortcutsNow(next, recover))
+}
+
+async function registerShortcutsNow(next: AppSettings, recover: boolean): Promise<void> {
+  const kde = await kdeBackend()
+  await unregisterGlobalShortcuts()
+  const handlers: Record<GlobalShortcutKey, () => void> = {
     captureShortcut: () => { void beginCapture('region') }, fullscreenShortcut: () => { void beginCapture('fullscreen') },
     studioShortcut: openStudioWindow, liveColorShortcut: () => { void beginLiveColor().then((result) => { if (result.error) notify('Live Color', result.error) }) }
+  }
+  const bind = async (action: string, value: string, handler: () => void): Promise<boolean> => {
+    if (kde) return kde.bind(action, value, shortcutLabels[action] ?? action, handler)
+    try { return globalShortcut.register(value, handler) } catch { return false }
   }
   const used = new Set<string>()
   const issues: string[] = []
@@ -1151,12 +1208,13 @@ function registerShortcuts(next = settings, recover = true): void {
     for (const key of globalShortcutKeys) {
       const requested = canonicalShortcut(next[key])
       if (!recover && reservedByDesktop(requested)) throw new Error(`${requested} ja e usado pelo ${desktopShortcuts.label || 'sistema'}. Escolha uma das sugestoes disponiveis.`)
-      const options = recover ? [requested, ...availableCandidates(key)].filter((value) => !reservedByDesktop(value)) : [requested]
+      if (!recover && brokenOnPlatform(requested, process.platform)) throw new Error(`${requested} nao funciona no Linux (Shift+numero vira outro simbolo). Use Alt+numero ou uma das sugestoes.`)
+      const options = recover ? [requested, ...availableCandidates(key)].filter((value) => !reservedByDesktop(value) && !brokenOnPlatform(value, process.platform)) : [requested]
       let chosen = ''
       for (const value of [...new Set(options)]) {
         const identity = shortcutIdentity(value, process.platform)
         if (!validGlobalShortcut(value) || used.has(identity)) continue
-        try { if (globalShortcut.register(value, handlers[key])) { chosen = value; used.add(identity); break } } catch { /* Invalid or reserved by the desktop. */ }
+        if (await bind(key, value, handlers[key])) { chosen = value; used.add(identity); break }
       }
       if (!chosen) {
         const error = `${key}: ${requested} indisponivel ou em conflito. Escolha uma sugestao nas configuracoes.`
@@ -1171,31 +1229,29 @@ function registerShortcuts(next = settings, recover = true): void {
       let registered = false
       if (reservedByDesktop('PrintScreen')) issues.push(`Print Screen ja abre a ferramenta de captura do ${desktopShortcuts.label || 'sistema'}; use o atalho de captura do GCPShot.`)
       else {
-        try { registered = globalShortcut.register('PrintScreen', () => void beginCapture('region', true)) } catch { /* Reserved by the system. */ }
+        registered = await bind('printScreen', 'PrintScreen', () => void beginCapture('region', true))
         if (!registered) issues.push('Print Screen esta reservado pelo sistema; use o atalho de captura.')
       }
     }
     shortcutIssues = issues
   } finally {
-    if (shortcutEditors.size) globalShortcut.unregisterAll()
+    if (shortcutEditors.size) await unregisterGlobalShortcuts()
   }
 }
 
 async function shortcutInfo(): Promise<ShortcutInfo> {
   if (process.platform === 'linux') desktopShortcuts = await readDesktopShortcuts().catch(() => desktopShortcuts)
   const suggestions = {} as ShortcutInfo['suggestions']
-  // Wayland portal registration is asynchronous and consent-gated: never probe it, rely on the desktop's own config.
-  const portal = isWaylandSession
+  // KDE: every candidate is checked live with kglobalaccel. Other Wayland desktops: portal is consent-gated, rely on their config.
+  const kde = await kdeBackend()
+  const portal = isWaylandSession && !kde
   for (const key of globalShortcutKeys) {
-    suggestions[key] = availableCandidates(key).filter((value) => {
-      if (globalShortcutKeys.some((other) => other !== key && shortcutIdentity(settings[other], process.platform) === shortcutIdentity(value, process.platform))) return false
-      if (portal || globalShortcut.isRegistered(value)) return true
-      try {
-        if (!globalShortcut.register(value, () => {})) return false
-        globalShortcut.unregister(value)
-        return true
-      } catch { return false }
-    })
+    const free: string[] = []
+    for (const value of availableCandidates(key)) {
+      if (globalShortcutKeys.some((other) => other !== key && shortcutIdentity(settings[other], process.platform) === shortcutIdentity(value, process.platform))) continue
+      if (shortcutIdentity(settings[key], process.platform) === shortcutIdentity(value, process.platform) || (await shortcutIsFree(value))) free.push(value)
+    }
+    suggestions[key] = free
   }
   const session = isWaylandSession ? 'Wayland' : 'X11'
   const platform = process.platform === 'darwin' ? `macOS ${process.arch === 'arm64' ? 'Apple Silicon' : 'Intel'}` : process.platform === 'win32' ? 'Windows' : `Linux (${desktopShortcuts.label ? `${desktopShortcuts.label}, ` : ''}${session})`
@@ -1208,11 +1264,11 @@ function updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
     const next = normalizeSettingsShortcuts({ ...settings, ...patch })
     const changed = globalShortcutKeys.some((key) => next[key] !== previous[key]) || next.printScreenShortcut !== previous.printScreenShortcut
     try {
-      if (changed) registerShortcuts(next, false)
+      if (changed) await registerShortcuts(next, false)
       await saveSettings(next)
       settings = next
     } catch (error) {
-      if (changed) registerShortcuts(previous, true)
+      if (changed) await registerShortcuts(previous, true).catch(() => {})
       throw error
     }
     if (next.startWithWindows !== previous.startWithWindows) applyLoginItemSettings()
@@ -1271,8 +1327,10 @@ app.whenReady().then(async () => {
   if (!ownsInstance) return
   if (process.platform === 'darwin') app.dock?.setIcon(getAppIcon())
   if (process.platform === 'linux') desktopShortcuts = await readDesktopShortcuts().catch(() => desktopShortcuts)
+  // Chromium's portal left stale, never-firing entries under the "gcpshot" component on Plasma; GCPShot now owns "gcpshotkeys".
+  if (kdeKeys) await kdeKeys.purge('gcpshot').catch(() => 0)
   settings = await loadSettings()
-  registerShortcuts(settings, true)
+  await registerShortcuts(settings, true).catch((error) => console.error('GCPShot: falha ao registrar atalhos.', error))
   await saveSettings(settings).catch((error) => console.error('GCPShot: nao foi possivel persistir os atalhos iniciais.', error))
   showWelcome = await readFile(join(app.getPath('userData'), 'welcome-version.txt'), 'utf8').then((version) => version !== app.getVersion()).catch(() => true)
   await loadColorLibrary()
@@ -1318,4 +1376,5 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
+  kdeKeys?.stop()
 })

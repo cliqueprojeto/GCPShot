@@ -46,4 +46,26 @@ for (const key of shortcuts.globalShortcutKeys) {
   for (const value of shortcuts.shortcutCandidates('linux', key)) assert.ok(!/^Ctrl\+Alt\+(F\d+|T|L|D)$/.test(value), `Linux system collision: ${value}`)
   assert.ok(shortcuts.shortcutCandidates('linux', key).length >= 10, 'Linux must offer many free suggestions')
 }
+// Linux: easiest suggestions are Alt+1…Alt+4, and Shift+digit (never fires on Linux) is never offered.
+assert.deepEqual([...shortcuts.globalShortcutKeys].map((key) => shortcuts.shortcutCandidates('linux', key)[0]), ['Alt+1', 'Alt+2', 'Alt+3', 'Alt+4'])
+for (const key of shortcuts.globalShortcutKeys) {
+  for (const value of shortcuts.shortcutCandidates('linux', key)) {
+    assert.ok(!/Shift\+[0-9]$/.test(value), `Shift+digit suggested on Linux: ${value}`)
+    assert.ok(!/^Alt\+[A-Z]$/.test(value), `Alt+letter steals app menus: ${value}`)
+  }
+}
+assert.equal(shortcuts.brokenOnPlatform('Alt+Shift+2', 'linux'), true)
+assert.equal(shortcuts.brokenOnPlatform('Alt+2', 'linux'), false)
+assert.equal(shortcuts.brokenOnPlatform('Alt+Shift+2', 'win32'), false)
+// GCPShot's own KDE entries (stale portal bindings) must not count as reserved by the system.
+const own = shortcuts.parseKdeShortcuts('[gcpshot]\nABC-Alt+Shift+S=Alt+Shift+S,Alt+Shift+S,GCPShot shortcut\n[gcpshotkeys]\ncaptureShortcut=Alt+1,none,Capturar\n[kwin]\nExpose=Ctrl+F9,Ctrl+F9,Janelas\n')
+assert.deepEqual([...own], ['Ctrl+F9'])
+// Qt key codes sent to kglobalaccel.
+const keyModule = ts.transpileModule(fs.readFileSync('src/main/kdeShortcuts.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+const keyContext = { exports: {}, require: (name) => name === '../shared/shortcuts' ? shortcuts : require(name) }
+vm.runInNewContext(keyModule, keyContext)
+assert.equal(keyContext.exports.qtKeyCode('Alt+1'), 0x08000031)
+assert.equal(keyContext.exports.qtKeyCode('Ctrl+Alt+Shift+F12'), 0x0E00003B + 0x01000000 - 0x3B + 0x3B)
+assert.equal(keyContext.exports.qtKeyCode('Super+Shift+S'), 0x12000053)
+assert.equal(keyContext.exports.qtKeyCode('PrintScreen'), 0x01000009)
 console.log('Update version ordering, installer selection per OS and desktop shortcut parsing passed.')

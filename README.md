@@ -128,16 +128,19 @@ O GCPShot **verifica no seu sistema quais combinações estão livres** antes de
 <p align="center"><img src="docs/images/10-config-atalhos.png" alt="Configurações de atalhos com sugestões livres" width="900"></p>
 
 - Cada sistema tem sugestões próprias. Combinações que roubariam teclas de outros programas nunca são sugeridas: `Ctrl+Shift+letra` (Salvar como, Inspecionar), `Ctrl+Alt` no Windows (é o AltGr dos teclados ABNT2), `Cmd+Shift+3/4/5/6` no macOS e `Ctrl+Alt+F1…F12/T/L` no Linux.
-- No Linux, os atalhos já usados pelo **KDE Plasma** e pelo **GNOME** são lidos da configuração do sistema e excluídos.
+- No Linux, os atalhos já usados pelo **KDE Plasma** e pelo **GNOME** são lidos da configuração do sistema e excluídos. No KDE Plasma (Wayland) cada sugestão é confirmada ao vivo com o serviço de atalhos do Plasma, e os atalhos do GCPShot aparecem em *Configurações do Sistema › Atalhos › GCPShot*.
+- No Linux, `Shift+número` nunca é sugerido: o sistema entrega o símbolo (`Shift+2` = `@`) e o atalho não dispararia.
 - Se uma tecla estiver ocupada por outro programa, o GCPShot usa a próxima sugestão livre e avisa, como na imagem acima.
 - Todos os atalhos do editor (ferramentas, copiar, salvar, desfazer…) também podem ser regravados.
 
-| Ação | Sugestão padrão (Windows/Linux) | macOS |
-| --- | --- | --- |
-| Capturar região | `Alt+Shift+S` | `Ctrl+Shift+S` |
-| Capturar tela inteira | `Alt+Shift+F` | `Ctrl+Shift+F` |
-| Abrir o Estúdio | `Alt+Shift+E` | `Ctrl+Shift+E` |
-| Live Color | `Alt+Shift+C` | `Ctrl+Shift+C` |
+| Ação | Linux | Windows | macOS |
+| --- | --- | --- | --- |
+| Capturar região | `Alt+1` | `Alt+Shift+S` | `Ctrl+Shift+S` |
+| Capturar tela inteira | `Alt+2` | `Alt+Shift+F` | `Ctrl+Shift+F` |
+| Abrir o Estúdio | `Alt+3` | `Alt+Shift+E` | `Ctrl+Shift+E` |
+| Live Color | `Alt+4` | `Alt+Shift+C` | `Ctrl+Shift+C` |
+
+Se uma delas estiver ocupada, a próxima livre é usada (`Alt+5…Alt+8`, depois `Alt+Shift+letra`, `Ctrl+Alt+número`…).
 
 ---
 
@@ -164,7 +167,7 @@ O GCPShot fica na bandeja com acesso rápido à captura, ao Estúdio, ao Color L
 
 ## Linux: Wayland, KDE Plasma e BigLinux
 
-- **Sem a janela "Compartilhar tela":** no Wayland, a captura usa o monitor onde está o mouse. No KDE Plasma/BigLinux ela é silenciosa pelo KWin, a mesma via usada pelo Spectacle, e o app registra a permissão sozinho. No GNOME e em outros ambientes é usado o portal de captura sem seletor de tela. No Sway/Hyprland, o `grim`.
+- **Sem a janela "Compartilhar tela":** no Wayland, a captura usa o monitor onde está o mouse, com o tamanho real de cada tela mesmo quando os monitores têm escalas diferentes (ex.: notebook a 125% + monitor externo a 100%). A tela inteira inclui a barra de tarefas. No KDE Plasma/BigLinux ela é silenciosa pelo KWin, a mesma via usada pelo Spectacle, e o app registra a permissão sozinho. No GNOME e em outros ambientes é usado o portal de captura sem seletor de tela. No Sway/Hyprland, o `grim`.
 - **Live Color com lupa em tempo real** também no Wayland.
 - Pacotes nativos `.deb`, `.rpm` e Arch (`.pkg.tar.zst`), testados automaticamente no Ubuntu, Fedora e Arch a cada versão.
 

@@ -542,13 +542,11 @@ function CaptureOverlay(): JSX.Element {
       return
     }
 
-    setSelectedRect({
-      x: 0,
-      y: 0,
-      width: window.innerWidth,
-      height: window.innerHeight
-    })
-    setToolbarPosition(getToolbarPositionForRect({ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }))
+    // The monitor size, not the window size at load time: Wayland may still be resizing the fullscreen window.
+    const monitor = payload.segments[0]
+    const fullRect = { x: 0, y: 0, width: monitor?.width || window.innerWidth, height: monitor?.height || window.innerHeight }
+    setSelectedRect(fullRect)
+    setToolbarPosition(getToolbarPositionForRect(fullRect))
     setTool('pen')
     setOpenMenu(null)
     setStatus(t(language, 'fullscreenSelected'))

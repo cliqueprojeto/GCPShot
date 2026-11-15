@@ -1,6 +1,6 @@
 pkgname=gcpshot
-_debver=0.8.0
-pkgver=0.8.0
+_debver=0.8.1
+pkgver=0.8.1
 pkgrel=1
 pkgdesc='GCPShot - captura de tela, Color Lab e estudio de imagem'
 arch=('x86_64')
